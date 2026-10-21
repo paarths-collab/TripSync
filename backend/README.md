@@ -98,6 +98,20 @@ DEMO_PASSWORD=... python -m scripts.seed_demo --reset   # delete only the demo u
 
 ---
 
+## Campus scheduling (shared-taxi parties)
+
+Two students can agree to share one taxi between a campus point and a hub. The endpoints live under `/api/campus`. A party is a participant agreement, not a booking, dispatch or safety guarantee. The state machines, eligibility rule, endpoint and error reference, reconciliation protocol and concurrency notes are in [docs/campus-scheduling.md](../docs/campus-scheduling.md).
+
+The campus tests run offline on SQLite. The Postgres concurrency tests are opt-in (run from `backend/`):
+
+```bash
+python -m pytest -q tests/test_campus_*.py
+TRIPSYNC_TEST_PG_URL='postgresql+psycopg2://<user>:<password>@127.0.0.1:55432/<db>' \
+  python -m pytest -q tests/test_campus_party_postgres.py
+```
+
+---
+
 ## 📋 Prerequisites
 
 - **Python 3.10+** (the code uses `X | None` annotations)
