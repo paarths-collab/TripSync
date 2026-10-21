@@ -62,81 +62,21 @@ async def get_route(
     except HTTPException:
         # Re-raise HTTP exceptions as-is
         raise
+    except map_service.RoutingProviderTimeout:
+        logger.error("Routing provider timed out")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Routing provider timed out",
+        ) from None
+    except map_service.RoutingProviderError:
+        logger.error("Routing provider unavailable")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Routing provider unavailable",
+        ) from None
     except Exception as e:
-        logger.error(f"Unexpected error in route endpoint: {e}")
+        logger.error(f"Unexpected error in route endpoint ({type(e).__name__})")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while calculating the route. Please try again later.",
         )
-
-# Debug endpoint for testing OLA Maps API directly
-@router.get("/debug/ola-test")
-async def test_ola_api(
-    start_lat: float,
-    start_lng: float, 
-    end_lat: float,
-    end_lng: float,
-    current_user: user_model.User = Depends(auth_service.get_current_user),
-):
-    """Debug endpoint to test Ola Maps API directly"""
-    import httpx
-    from app.core.config import settings
-    
-    origin_str = f"{start_lat},{start_lng}"
-    destination_str = f"{end_lat},{end_lng}"
-    
-    params = {
-        "origin": origin_str,
-        "destination": destination_str,
-        "api_key": settings.OLA_MAPS_API_KEY,
-        "mode": "driving",
-        "alternatives": "false",
-        "steps": "false", 
-        "geometries": "polyline",
-        "overview": "full"
-    }
-    
-    # Configure proxy if available
-    proxy_config = settings.OLA_MAPS_PROXY if hasattr(settings, 'OLA_MAPS_PROXY') and settings.OLA_MAPS_PROXY else None
-    
-    client_config = {
-        "timeout": 30.0,
-        "headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json",
-            "Referer": "https://olamaps.io/"
-        },
-        "verify": False
-    }
-    
-    if proxy_config:
-        client_config["proxies"] = {"https://": proxy_config, "http://": proxy_config}
-    
-    async with httpx.AsyncClient(**client_config) as client:
-        try:
-            response = await client.get(
-                "https://api.olamaps.io/routing/v1/directions",
-                params=params
-            )
-            
-            # Check if response is a carrier filter block page
-            if "Web Filter Violation" in response.text or "Access Blocked" in response.text:
-                return {
-                    "error": "Carrier filter is blocking api.olamaps.io. Please use a VPN or contact your carrier.",
-                    "status_code": 403,
-                    "params_sent": params
-                }
-            
-            return {
-                "status_code": response.status_code,
-                "request_url": str(response.url),
-                "response_json": response.json() if response.status_code == 200 else None,
-                "response_text": response.text[:2000] if response.status_code != 200 else "Success",
-                "headers": dict(response.headers)
-            }
-            
-        except Exception as e:
-            return {
-                "error": str(e),
-                "params_sent": params
-            }

@@ -9,6 +9,7 @@ from app.models import user_model, pooling_model, profile_model, service_model, 
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+from app.core.log_redaction import RedactSecretsFilter
 
 load_dotenv()
 
@@ -51,6 +52,14 @@ console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(formatter)
 logging.getLogger().addHandler(console_handler)
+
+# httpx/httpcore log full request URLs (including ?api_key=...) at INFO.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+# Scrub API keys from every record written by any handler configured here.
+for _handler in (file_handler, error_handler, console_handler):
+    _handler.addFilter(RedactSecretsFilter())
 # This function will create the database tables.
 def create_db_and_tables():
     Base.metadata.create_all(bind=engine)

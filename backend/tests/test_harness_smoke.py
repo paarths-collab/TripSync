@@ -38,13 +38,13 @@ def test_block_network_blocks_provider_call(client, college, make_user, caplog):
     with pytest.raises(RuntimeError, match="network disabled in tests"):
         asyncio.run(_try_request())
 
-    # Through the app: map_service catches every exception and returns None,
-    # so the route answers with an error status rather than a route.
+    # Through the app: the blocked RuntimeError is a provider failure, which
+    # map_service raises as RoutingProviderError and the route maps to 502.
     _, headers = make_user("bob@example.test", "Bob Example", college, phone="+10000000002")
     body = {"start_lat": 19.07, "start_lng": 72.87, "end_lat": 19.13, "end_lng": 72.83}
 
     with caplog.at_level(logging.ERROR):
         response = client.post("/api/map/route", json=body, headers=headers)
 
-    assert response.status_code >= 400
-    assert "network disabled in tests" in caplog.text
+    assert response.status_code == 502
+    assert "test-ola-key-SENTINEL" not in response.text
