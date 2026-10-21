@@ -18,20 +18,25 @@ async def get_route(
     Provides route details (polyline, distance, duration) between two points.
     This endpoint is protected and requires user authentication.
     """
-    logger.info(f"Route request from user {current_user.id}: "
-                f"({request_data.start_lat}, {request_data.start_lng}) -> "
-                f"({request_data.end_lat}, {request_data.end_lng})")
+    # Coordinates and user ids are location data: never logged above DEBUG.
+    logger.info("Route requested")
+    logger.debug(
+        "Route request user_id=%s start=(%s, %s) end=(%s, %s)",
+        current_user.id,
+        request_data.start_lat, request_data.start_lng,
+        request_data.end_lat, request_data.end_lng,
+    )
     
     # Validate coordinates before calling the service
     if not (-90 <= request_data.start_lat <= 90) or not (-180 <= request_data.start_lng <= 180):
-        logger.error(f"Invalid start coordinates: {request_data.start_lat}, {request_data.start_lng}")
+        logger.error("Invalid coordinates rejected (start)")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid start coordinates: latitude must be between -90 and 90, longitude must be between -180 and 180",
         )
     
     if not (-90 <= request_data.end_lat <= 90) or not (-180 <= request_data.end_lng <= 180):
-        logger.error(f"Invalid end coordinates: {request_data.end_lat}, {request_data.end_lng}")
+        logger.error("Invalid coordinates rejected (end)")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid end coordinates: latitude must be between -90 and 90, longitude must be between -180 and 180",

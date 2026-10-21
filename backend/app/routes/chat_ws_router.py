@@ -48,7 +48,11 @@ async def chat_websocket(
 
     user_id = current_user.id
 
-    await manager.connect(user_id, websocket)
+    # Echo only the protocol name 'token' (never the JWT) when the client offered it.
+    offered = websocket.scope.get("subprotocols", [])
+    await manager.connect(
+        user_id, websocket, subprotocol="token" if "token" in offered else None
+    )
 
     try:
         while True:

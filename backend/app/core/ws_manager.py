@@ -13,9 +13,15 @@ class ConnectionManager:
         # user_id -> every live socket for that user (several tabs/devices).
         self.active_connections: Dict[int, List[WebSocket]] = {}
 
-    async def connect(self, user_id: int, websocket: WebSocket):
-        """Accepts a new WebSocket connection and stores it."""
-        await websocket.accept()
+    async def connect(self, user_id: int, websocket: WebSocket, subprotocol: Optional[str] = None):
+        """Accepts a new WebSocket connection and stores it.
+
+        subprotocol is echoed back in the handshake. Pass only a protocol name
+        the client offered (e.g. "token"), never the credential itself: strict
+        browser clients fail the handshake when they offered subprotocols and
+        the server selects none.
+        """
+        await websocket.accept(subprotocol=subprotocol)
         self.active_connections.setdefault(user_id, []).append(websocket)
         logger.info("User %s connected via WebSocket.", user_id)
 

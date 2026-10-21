@@ -8,11 +8,13 @@ from app.core.ws_manager import ConnectionManager
 class FakeSocket:
     def __init__(self, fail=False):
         self.accepted = False
+        self.accepted_subprotocol = "unset"
         self.received = []
         self.fail = fail
 
-    async def accept(self):
+    async def accept(self, subprotocol=None):
         self.accepted = True
+        self.accepted_subprotocol = subprotocol
 
     async def send_json(self, message):
         if self.fail:
@@ -91,3 +93,46 @@ def test_failing_socket_does_not_raise_and_is_dropped():
 def test_send_to_unknown_user_is_a_noop():
     mgr = ConnectionManager()
     _run(mgr.send_personal_message({"n": 1}, 999))
+
+
+def test_connect_passes_subprotocol_to_accept():
+    mgr = ConnectionManager()
+    sock = FakeSocket()
+
+    _run(mgr.connect(1, sock, subprotocol="token"))
+
+    assert sock.accepted is True
+    assert sock.accepted_subprotocol == "token"
+
+
+def test_connect_without_subprotocol_accepts_with_none():
+    mgr = ConnectionManager()
+    sock = FakeSocket()
+
+    _run(mgr.connect(1, sock))
+
+    assert sock.accepted is True
+    assert sock.accepted_subprotocol is None
+
+
+def _bearer_token(headers):
+    return headers["Authorization"].removeprefix("Bearer ")
+
+
+def test_pool_websocket_echoes_token_subprotocol_only(client, college, make_user):
+    _, headers = make_user("wspool@example.test", "WS Pool", college, phone="+10000000101")
+    jwt = _bearer_token(headers)
+
+    with client.websocket_connect("/api/ws/pool", subprotocols=["token", jwt]) as ws:
+        assert ws.accepted_subprotocol == "token"
+        assert ws.accepted_subprotocol != jwt
+
+
+def test_chat_websocket_echoes_token_subprotocol_only(client, college, make_user):
+    _, headers = make_user("wschat@example.test", "WS Chat", college, phone="+10000000102")
+    jwt = _bearer_token(headers)
+
+    with client.websocket_connect("/api/ws/chat", subprotocols=["token", jwt]) as ws:
+        assert ws.accepted_subprotocol == "token"
+        assert ws.accepted_subprotocol != jwt
+

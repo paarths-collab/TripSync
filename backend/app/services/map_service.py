@@ -75,11 +75,11 @@ async def get_route_from_ola(
     """
     # Validate coordinates
     if not (-90 <= start_lat <= 90) or not (-180 <= start_lng <= 180):
-        logger.error(f"Invalid start coordinates: {start_lat}, {start_lng}")
+        logger.error("Invalid coordinates rejected (start)")
         return None
 
     if not (-90 <= end_lat <= 90) or not (-180 <= end_lng <= 180):
-        logger.error(f"Invalid end coordinates: {end_lat}, {end_lng}")
+        logger.error("Invalid coordinates rejected (end)")
         return None
 
     # Format coordinates for Ola API
@@ -100,7 +100,8 @@ async def get_route_from_ola(
         "Content-Type": "application/json",
     }
 
-    logger.info(f"Requesting route from {origin_str} to {destination_str}")
+    logger.info("Requesting route from routing provider")
+    logger.debug("Route coordinates origin=%s destination=%s", origin_str, destination_str)
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
