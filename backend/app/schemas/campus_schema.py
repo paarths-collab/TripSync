@@ -42,11 +42,12 @@ class TimeOut(BaseModel):
         if dt is None:
             return None
         aware = campus_time.from_db(dt)
-        return cls(
-            utc=campus_time.utc_iso(aware),
-            local=campus_time.local_iso(aware, tz_name),
-            timezone=tz_name,
-        )
+        utc = campus_time.utc_iso(aware)
+        try:
+            local = campus_time.local_iso(aware, tz_name)
+        except (OverflowError, ValueError):  # out-of-range instant: never 500 on render
+            local = utc
+        return cls(utc=utc, local=local, timezone=tz_name)
 
 
 def time_out(dt: Optional[datetime], tz_name: str) -> Optional[TimeOut]:
@@ -273,6 +274,8 @@ class SuggestionsResponse(BaseModel):
     request_id: int
     estimate_status: str
     suggestions: List[SuggestionOut]
+    # True when more candidates matched than the per-call cap; the closest are kept.
+    truncated: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -423,7 +426,10 @@ class MemberOut(BaseModel):
     full_name: Optional[str] = None
     request_id: int
     you: bool
+    # Blind reporting: your own outcome always; the partner's only once the party
+    # ended. ``reported`` says whether that member has reported at all.
     report_outcome: Optional[str] = None
+    reported: bool = False
 
 
 class PartnerOut(BaseModel):
@@ -489,7 +495,13 @@ class PartyOut(BaseModel):
                     full_name=m.user.full_name,
                     request_id=m.request_id,
                     you=(m.user_id == viewer_id),
-                    report_outcome=_val(m.report_outcome) if m.report_outcome else None,
+                    report_outcome=(
+                        _val(m.report_outcome)
+                        if m.report_outcome
+                        and (m.user_id == viewer_id or _val(party.state) != PartyState.AGREED.value)
+                        else None
+                    ),
+                    reported=m.report_outcome is not None,
                 )
                 for m in members
             ],

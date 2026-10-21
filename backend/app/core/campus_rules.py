@@ -151,12 +151,15 @@ def eligible_pair(req_a: Any, req_b: Any, now: datetime) -> Eligibility:
 
 
 def deadline_warnings(
-    req_a: Any, req_b: Any, feasible_end: datetime, estimate: Any
+    req_a: Any, req_b: Any, earliest_feasible_departure: datetime, estimate: Any
 ) -> List[str]:
     """Warning codes about ``arrive_by`` deadlines.
 
+    A party departs at the EARLIEST feasible instant (callers pass
+    ``max(feasible_start, now)``), not at the end of the window, so the test is
+    ``earliest_feasible_departure + duration > earliest arrive_by``.
     ``estimate`` is an object or mapping with ``status`` ("VERIFIED"/"UNVERIFIED")
-    and ``duration_s``; None is treated as UNVERIFIED.
+    and ``duration_s``; None is treated as UNVERIFIED. No arrive_by -> no warnings.
     """
     deadlines = [_utc(r.arrive_by) for r in (req_a, req_b) if r.arrive_by is not None]
     if not deadlines:
@@ -167,7 +170,7 @@ def deadline_warnings(
         status = getattr(estimate, "status", None)
         duration = getattr(estimate, "duration_s", None)
     if _val(status) == "VERIFIED" and duration is not None:
-        arrival = _utc(feasible_end) + timedelta(seconds=duration)
+        arrival = _utc(earliest_feasible_departure) + timedelta(seconds=duration)
         if any(arrival > d for d in deadlines):
             return [WARNING_CANNOT_MEET_ARRIVE_BY]
         return []

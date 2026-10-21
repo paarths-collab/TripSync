@@ -297,6 +297,20 @@ def test_deadline_warnings_accept_mapping_and_enum_status():
     assert rules.deadline_warnings(a, b, at(120), est(EstimateStatus.VERIFIED, 30)) == []
 
 
+def test_deadline_uses_earliest_feasible_departure_not_window_end():
+    """A party leaves at the earliest feasible instant: a window that ends late
+    must not trigger a warning when leaving at its start still meets the deadline."""
+    deadline = at(60) + timedelta(minutes=45)
+    a, b = pair(a_kwargs={"arrive_by": deadline})
+    duration = est("VERIFIED", 40 * 60)
+    # leaving at +60 min arrives at +100, before the +105 deadline
+    assert rules.deadline_warnings(a, b, earliest_feasible_departure=at(60), estimate=duration) == []
+    # the window END (+180) would have been too late; that is no longer the test
+    assert rules.deadline_warnings(a, b, earliest_feasible_departure=at(180), estimate=duration) == [
+        "cannot_meet_arrive_by"
+    ]
+
+
 # --- small helpers ----------------------------------------------------------
 def test_pair_key_orders_ids():
     assert rules.pair_key(9, 3) == (3, 9) and rules.pair_key(3, 9) == (3, 9)

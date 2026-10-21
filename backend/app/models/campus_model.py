@@ -140,6 +140,7 @@ class TravelRequest(Base):
             "ix_travel_requests_corridor",
             "college_id", "origin_landmark_id", "hub_id", "direction", "status",
         ),
+        sa.Index("ix_travel_requests_status_expires", "status", "expires_at"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
