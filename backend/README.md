@@ -7,7 +7,7 @@ The API runs locally with Uvicorn. Docker Compose starts only PostgreSQL and Adm
 
 ## 🔧 Environment Setup
 
-Copy the template and fill in your values:
+Copy the template and edit the placeholders in `.env`:
 
 ```bash
 cp .env.example .env
@@ -15,24 +15,6 @@ cp .env.example .env
 
 `backend/.env.example` lists every variable the app reads, with placeholder values.
 Never commit `.env`.
-
-Create a `.env` file in the `TripSync/backend/` directory (values shown are placeholders):
-
-```bash
-# TripSync/backend/.env
-
-# Variables for Docker Compose
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=<postgres-password>
-POSTGRES_DB=tripsync_db
-POSTGRES_PORT=5433
-
-# Variables for the FastAPI application
-DATABASE_URL="postgresql://postgres:<postgres-password>@localhost:5433/tripsync_db"
-ALLOW_ORIGINS="*"
-```
-
-Use the Postgres password configured in `docker-compose.yml` / your `.env`. `<postgres-password>` is a placeholder; replace it with that value.
 
 ---
 
@@ -125,7 +107,10 @@ The tests run offline on an in-memory SQLite database. They need no running Post
 
 ## 🧪 API notes
 
-- **Chat endpoints** (`/api/chat/...`, `/api/ws/chat`) require an approved, active ride. Otherwise they return 403.
+- **Chat start and send** (`GET /api/chat/conversations/find-or-create`, `POST /api/chat/messages`) require an active approved ride with the partner: 400 for yourself, 404 for an unknown user, 403 without an active ride.
+- **Conversation list** (`GET /api/chat/conversations`) lists only your conversations. The partner's `phone_number`, `email`, `year_of_study`, and `bio` are null unless the ride is active.
+- **Message history and read receipts** (`GET /api/chat/messages/{id}`, `POST /api/chat/messages/{id}/read`) require conversation membership: 404 if the conversation is missing, 403 for a non-member. Members can still read history after a ride ends.
+- **Socket relays** (`/api/ws/pool`, `/api/ws/chat`) refuse unauthorized `chat_message` frames with `{"type": "error", "code": "not_authorized", ...}` and malformed frames with `code: "invalid_message"`.
 - **Map / route** (`POST /api/map/route`) returns 502 or 504 when the routing provider fails.
 - **Pool requests** (`POST /api/pool/requests`) return 502 or 504 when the matching provider fails, and 409 while a ride is active.
 - **Current pool request** (`GET /api/pool/requests/current`) is for state recovery after a reload. Its fields are `request`, `connection`, and `ride_ended`.
