@@ -83,6 +83,21 @@ FastAPI auto-generates interactive docs:
 
 ---
 
+## Demo data
+
+`scripts/seed_demo.py` creates two demonstration accounts, "Demo Rider A (demo)" and "Demo Rider B (demo)", with fictional data (example.test emails, 1000000000x phone numbers). They are not real people.
+
+Run from `backend/`. The password must come from the `DEMO_PASSWORD` environment variable (at least 8 characters):
+
+```bash
+DEMO_PASSWORD=... python -m scripts.seed_demo           # create or update the demo accounts (idempotent)
+DEMO_PASSWORD=... python -m scripts.seed_demo --reset   # delete only the demo users' chat and pooling data
+```
+
+`--reset` never drops tables and leaves other users' data alone.
+
+---
+
 ## 📋 Prerequisites
 
 - **Python 3.10+** (the code uses `X | None` annotations)
