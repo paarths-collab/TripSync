@@ -14,6 +14,7 @@ Only 2xx responses are stored. A key reused for a different target is a client
 bug -> 422 ``idempotency_key_reused``.
 """
 
+import copy
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -26,6 +27,20 @@ OP_ACCEPT_CONNECTION = "accept_connection"
 OP_CANCEL_PARTY = "cancel_party"
 
 REPLAY_HEADER = "Idempotent-Replay"
+
+
+def sanitize_body(body: Any) -> Any:
+    """Copy of ``body`` with the partner's phone/email nulled (privacy at rest).
+
+    Works for a party view and for ``{"connection": ..., "party": ...}``. Replays
+    rebuild the view from current state, so nothing depends on stored contacts.
+    """
+    out = copy.deepcopy(body)
+    party = out.get("party") if isinstance(out, dict) and isinstance(out.get("party"), dict) else out
+    if isinstance(party, dict) and isinstance(party.get("partner"), dict):
+        party["partner"]["phone_number"] = None
+        party["partner"]["email"] = None
+    return out
 
 
 def find_replay(
@@ -83,7 +98,7 @@ def store(
             key=key,
             target_id=target_id,
             response_status=status,
-            response_body=body,
+            response_body=sanitize_body(body),
             created_at=campus_time.to_db(campus_time.utcnow()),
         )
     )

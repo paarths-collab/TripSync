@@ -242,8 +242,13 @@ def _find_overlap(
 
 
 def _lock_user(db: Session, user: User) -> None:
-    """Serialise create/edit by one user (row lock; a no-op on SQLite)."""
-    db.query(User.id).filter(User.id == user.id).with_for_update().first()
+    """Serialise create/edit by one user (row lock; a no-op on SQLite).
+
+    FOR NO KEY UPDATE (key_share=True), never plain FOR UPDATE: inserts elsewhere
+    that reference the user (events, outbox, proposals) only take KEY SHARE on the
+    user row and must not wait behind this lock while holding request locks.
+    """
+    db.query(User.id).filter(User.id == user.id).with_for_update(key_share=True).first()
 
 
 def create_request(

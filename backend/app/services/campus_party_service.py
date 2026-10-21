@@ -32,6 +32,7 @@ is never exposed to a non-member.
 """
 
 import copy
+import functools
 import logging
 from datetime import timedelta
 from dataclasses import dataclass
@@ -146,12 +147,7 @@ def _lock_users(db: Session, user_ids) -> None:
 
 def _strip_contacts(body):
     """Defensive copy of a stored body with partner phone/email removed."""
-    out = copy.deepcopy(body)
-    party = out.get("party") if isinstance(out, dict) and "party" in out else out
-    if isinstance(party, dict) and isinstance(party.get("partner"), dict):
-        party["partner"]["phone_number"] = None
-        party["partner"]["email"] = None
-    return out
+    return campus_idempotency.sanitize_body(body)
 
 
 def _fresh_replay(db: Session, uid: int, op: str, stored):
@@ -274,6 +270,70 @@ async def _dispatch(db: Session, party_id: int) -> None:
             pass
 
 
+def _current_party_state(db: Session, uid: int, party_id) -> dict:
+    """The caller's authorized view of a party (empty when not a member)."""
+    try:
+        if _membership(db, party_id, uid) is None:
+            return {}
+        party = db.query(TravelParty).filter(TravelParty.id == party_id).populate_existing().one()
+        return {"party": _party_dict(db, party, uid)}
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        return {}
+
+
+def _current_proposal_state(db: Session, uid: int, proposal_id) -> dict:
+    try:
+        p = db.query(ConnectionProposal).filter(ConnectionProposal.id == proposal_id).populate_existing().first()
+        if p is None or uid not in (p.proposer_id, p.recipient_id):
+            return {}
+        return {"proposal": _proposal_dict(p, uid), "active_party": _active_party_dict(db, uid)}
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        return {}
+
+
+def _current_own_state(db: Session, uid: int, _target) -> dict:
+    try:
+        return {"active_party": _active_party_dict(db, uid)}
+    except Exception:  # noqa: BLE001
+        db.rollback()
+        return {}
+
+
+def retry_on_deadlock(current, fallback=None):
+    """Decorator for the service entry points ``fn(db, user, target_id, ...)``.
+
+    A Postgres deadlock / serialization failure surfaces as ``OperationalError``.
+    It means we lost a race, nothing was committed: roll back and run the WHOLE
+    operation once more (it re-reads everything under its locks). If it happens
+    again, never 500: ``fallback(db, user, *args, **kwargs)`` when given (accept ->
+    participant_busy) or 409 ``conflict_retry`` whose ``current`` is the caller's
+    authorized view built by ``current(db, user_id, target_id)``.
+    """
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(db, user, *args, **kwargs):
+            uid = user.id
+            for attempt in (0, 1):
+                try:
+                    return await fn(db, user, *args, **kwargs)
+                except OperationalError:
+                    db.rollback()
+                    logger.warning("%s: deadlock/serialization failure (attempt %s)", fn.__name__, attempt + 1)
+            if fallback is not None:
+                return fallback(db, user, *args, **kwargs)
+            target = args[0] if args else None
+            raise _err(409, "conflict_retry",
+                       "The server was busy with a competing change; please retry.",
+                       current(db, uid, target))
+
+        return wrapper
+
+    return decorator
+
+
 def _expire_overdue_proposals(
     db: Session,
     now,
@@ -316,6 +376,7 @@ def _expire_overdue_proposals(
 # ==========================================================================
 # Connections
 # ==========================================================================
+@retry_on_deadlock(_current_own_state)
 async def create_proposal(
     db: Session, user, suggestion_id: int, body: schemas.ConnectionCreate
 ) -> Result:
@@ -470,8 +531,13 @@ def _accept_conflict(
     return _err(409, code, message, current)
 
 
+def _accept_busy_fallback(db: Session, user, proposal_id: int, body: schemas.ConnectionAccept) -> Result:
+    return _accept_integrity_fallback(db, user.id, proposal_id, body, None, force=True)
+
+
+@retry_on_deadlock(_current_proposal_state, fallback=_accept_busy_fallback)
 async def accept_proposal(
-    db: Session, user, proposal_id: int, body: schemas.ConnectionAccept, _attempt: int = 0
+    db: Session, user, proposal_id: int, body: schemas.ConnectionAccept
 ) -> Result:
     uid = user.id
     op = campus_idempotency.OP_ACCEPT_CONNECTION
@@ -617,11 +683,6 @@ async def accept_proposal(
     except IntegrityError as exc:
         db.rollback()
         return _accept_integrity_fallback(db, uid, proposal_id, body, exc)
-    except OperationalError as exc:  # deadlock / serialization failure: a lost race
-        db.rollback()
-        if _attempt < 1:
-            return await accept_proposal(db, user, proposal_id, body, _attempt=1)
-        return _accept_integrity_fallback(db, uid, proposal_id, body, exc, force=True)
     except Exception:
         db.rollback()
         raise
@@ -716,10 +777,12 @@ async def _resolve_proposal(
     return Result(out)
 
 
+@retry_on_deadlock(_current_proposal_state)
 async def decline_proposal(db, user, proposal_id, body) -> Result:
     return await _resolve_proposal(db, user, proposal_id, body, action="decline")
 
 
+@retry_on_deadlock(_current_proposal_state)
 async def withdraw_proposal(db, user, proposal_id, body) -> Result:
     return await _resolve_proposal(db, user, proposal_id, body, action="withdraw")
 
@@ -766,6 +829,7 @@ def _end_party(
     return _supersede_pending_change(db, party.id, now_db)
 
 
+@retry_on_deadlock(_current_party_state)
 async def cancel_party(db: Session, user, party_id: int, body: schemas.PartyCancel) -> Result:
     uid = user.id
     op = campus_idempotency.OP_CANCEL_PARTY
@@ -876,6 +940,7 @@ def _validate_departure_and_landmark(
                        "The meeting point must be an active campus point of your college.")
 
 
+@retry_on_deadlock(_current_party_state)
 async def propose_change(
     db: Session, user, party_id: int, body: schemas.ChangeCreate
 ) -> Result:
@@ -948,6 +1013,7 @@ def _load_change(db: Session, party_id: int, change_id: int) -> PartyChangePropo
     return change
 
 
+@retry_on_deadlock(_current_party_state)
 async def decide_change(
     db: Session,
     user,
@@ -1038,6 +1104,7 @@ def _validate_still_applicable(db, party, change, uid, now) -> None:
                                   "The proposed meeting point is no longer valid.")
 
 
+@retry_on_deadlock(_current_party_state)
 async def update_cost_note(
     db: Session, user, party_id: int, body: schemas.PartyNotePatch
 ) -> Result:
@@ -1069,6 +1136,7 @@ async def update_cost_note(
     return Result(out)
 
 
+@retry_on_deadlock(_current_party_state)
 async def report_outcome(db: Session, user, party_id: int, body: schemas.ReportBody) -> Result:
     uid = user.id
     now, now_db = _now()

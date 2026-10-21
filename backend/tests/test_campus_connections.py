@@ -426,21 +426,23 @@ def test_accept_replay_after_party_ended_rebuilds_view_without_contacts(world):
     assert len(world.events(pid, "PARTY_AGREED")) == 1
 
 
-def test_stored_body_has_contacts_but_a_late_replay_never_does(world):
-    """The stored 2xx body contains contacts (as returned at the time); a replay after
-    the party ended is rebuilt from live state instead."""
+def test_idempotency_records_never_store_partner_contacts(world):
     p = world.pair("alice", "bob")
     first = world.accept("bob", p.proposal["id"], 1, key="K")
+    assert first.json()["party"]["partner"]["phone_number"] == "+910000000001"  # live response
     pid = first.json()["party"]["id"]
     world.client.post(f"{API}/parties/{pid}/cancel", headers=world.headers["alice"],
                       json={"idempotency_key": "c"})
-    db = world.sf()
-    rec = db.query(cm.IdempotencyRecord).filter_by(operation="accept_connection").one()
-    stored = json.loads(json.dumps(rec.response_body))
-    assert stored["party"]["partner"]["phone_number"] == "+910000000001"  # as stored at the time
-    db.close()
-    again = world.accept("bob", p.proposal["id"], 1, key="K")
-    assert "+910000000001" not in again.text
+    records = world.rows(cm.IdempotencyRecord)
+    assert {r.operation for r in records} == {"accept_connection", "cancel_party"}
+    for r in records:
+        blob = json.dumps(r.response_body)
+        assert "+91000" not in blob and "@example.test" not in blob
+    accept_rec = next(r for r in records if r.operation == "accept_connection")
+    assert accept_rec.response_body["party"]["partner"]["phone_number"] is None
+    assert accept_rec.response_body["party"]["partner"]["full_name"] == "Alice Example"
+    # a late replay is rebuilt from live state
+    assert "+910000000001" not in world.accept("bob", p.proposal["id"], 1, key="K").text
 
 
 def test_idempotency_key_reused_for_another_proposal_is_422(world):
@@ -632,6 +634,54 @@ def test_absurd_ids_are_422_not_500(world):
     assert world.client.post(f"{API}/suggestions/{big}/connections", headers=h, json={}).status_code == 422
     assert world.client.post(f"{API}/connections/{big}/accept", headers=h,
                              json={"expected_version": 1, "idempotency_key": "k"}).status_code == 422
+
+
+def fail_once(monkeypatch, name, times=1):
+    """Make svc.<name> raise a deadlock-style OperationalError its first ``times`` calls."""
+    from sqlalchemy.exc import OperationalError
+
+    real, calls = getattr(svc, name), []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) <= times:
+            raise OperationalError("SELECT ...", {}, Exception("deadlock detected"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(svc, name, flaky)
+    return calls
+
+
+def test_create_proposal_retries_once_then_conflict_retry(world, monkeypatch):
+    ra, rb = world.new_request("alice"), world.new_request("bob")
+    sid = world.suggestion(ra, rb)
+    calls = fail_once(monkeypatch, "_lock_requests", times=1)
+    assert world.propose("alice", sid).status_code == 201 and len(calls) == 2
+    assert len(world.rows(cm.ConnectionProposal)) == 1
+
+    rc, rd = world.new_request("carol"), world.new_request("dave")
+    sid2 = world.suggestion(rc, rd)
+    fail_once(monkeypatch, "_lock_requests", times=2)
+    resp = world.propose("carol", sid2)
+    assert resp.status_code == 409 and code(resp) == "conflict_retry"
+    assert "active_party" in resp.json()["detail"]["current"]
+    assert len(world.rows(cm.ConnectionProposal)) == 1
+
+
+@pytest.mark.parametrize("action,who", [("decline", "bob"), ("withdraw", "alice")])
+def test_decline_withdraw_retry_once_then_conflict_retry(world, monkeypatch, action, who):
+    p = world.pair("alice", "bob")
+    pid = p.proposal["id"]
+    fail_once(monkeypatch, "_lock_requests", times=1)
+    ok = world.client.post(f"{API}/connections/{pid}/{action}", headers=world.headers[who], json={})
+    assert ok.status_code == 200
+    p2 = world.pair("carol", "dave")
+    fail_once(monkeypatch, "_lock_requests", times=2)
+    who2 = "dave" if action == "decline" else "carol"
+    bad = world.client.post(f"{API}/connections/{p2.proposal['id']}/{action}",
+                            headers=world.headers[who2], json={})
+    assert bad.status_code == 409 and code(bad) == "conflict_retry"
+    assert bad.json()["detail"]["current"]["proposal"]["state"] == "PENDING"
 
 
 # ====================================================== threaded races (SQLite)

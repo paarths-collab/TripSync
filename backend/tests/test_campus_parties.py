@@ -640,3 +640,79 @@ def test_time_out_never_raises_for_out_of_range_instants():
     from app.schemas.campus_schema import TimeOut
     out = TimeOut.of(datetime(9999, 12, 31, 23, 0), "Asia/Kolkata")
     assert out.utc.startswith("9999-12-31T23:00:00") and out.local
+
+
+# ================================================= deadlock safety net (SQLite)
+def fail_once(monkeypatch, name, times=1):
+    from sqlalchemy.exc import OperationalError
+    from app.services import campus_party_service as svc
+
+    real, calls = getattr(svc, name), []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) <= times:
+            raise OperationalError("SELECT ...", {}, Exception("deadlock detected"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(svc, name, flaky)
+    return calls
+
+
+def test_cancel_retries_once_then_conflict_retry(world, monkeypatch):
+    p1, p2 = world.party("alice", "bob"), world.party("carol", "dave")
+    calls = fail_once(monkeypatch, "_lock_requests", times=1)
+    assert cancel(world, "alice", p1.id).status_code == 200 and len(calls) == 2
+    assert len(world.events(p1.id, "PARTY_CANCELLED")) == 1  # exactly one despite the retry
+    fail_once(monkeypatch, "_lock_requests", times=2)
+    resp = cancel(world, "carol", p2.id, key="z")
+    assert resp.status_code == 409 and code(resp) == "conflict_retry"
+    assert resp.json()["detail"]["current"]["party"]["state"] == "AGREED"
+    assert world.get(cm.TravelParty, p2.id).state == PS.AGREED
+
+
+def test_report_retries_once_then_conflict_retry(world, monkeypatch, party):
+    start_trip(world)
+    calls = fail_once(monkeypatch, "_lock_requests", times=1)
+    assert report(world, "alice", party.id, "COMPLETED").status_code == 200 and len(calls) == 2
+    assert len([e for e in world.events(party.id) if e.event_type == "REPORT_RECORDED"]) == 1
+    fail_once(monkeypatch, "_lock_requests", times=2)
+    resp = report(world, "bob", party.id, "COMPLETED")
+    assert resp.status_code == 409 and code(resp) == "conflict_retry"
+    assert resp.json()["detail"]["current"]["party"]["state"] == "AGREED"
+
+
+def test_change_flow_and_note_retry_once_then_conflict_retry(world, monkeypatch, party):
+    dep = iso(world.clock.now + timedelta(minutes=45))
+    calls = fail_once(monkeypatch, "_lock_party", times=1)
+    created = propose_change(world, "alice", party.id, 1, agreed_departure=dep)
+    assert created.status_code == 201 and len(calls) == 2
+    ch = created.json()
+
+    fail_once(monkeypatch, "_lock_party", times=1)
+    ok = decide(world, "bob", party.id, ch["id"], "approve", expected_party_version=2)
+    assert ok.status_code == 200
+
+    fail_once(monkeypatch, "_lock_party", times=1)
+    note = world.client.patch(url(party.id), headers=world.headers["bob"],
+                              json={"expected_version": 3, "cost_note": "50/50"})
+    assert note.status_code == 200 and note.json()["cost_note"] == "50/50"
+
+    for name, call in (
+        ("propose", lambda: propose_change(world, "alice", party.id, 4, agreed_departure=dep)),
+        ("note", lambda: world.client.patch(url(party.id), headers=world.headers["bob"],
+                                            json={"expected_version": 4, "cost_note": "x"})),
+    ):
+        fail_once(monkeypatch, "_lock_party", times=2)
+        resp = call()
+        assert resp.status_code == 409 and code(resp) == "conflict_retry", name
+        assert resp.json()["detail"]["current"]["party"]["version"] == 4
+
+    # approve / reject / withdraw hit the same net
+    good = propose_change(world, "alice", party.id, 4, agreed_departure=dep).json()
+    for action, who, kw in (("approve", "bob", {"expected_party_version": 5}),
+                            ("reject", "bob", {}), ("withdraw", "alice", {})):
+        fail_once(monkeypatch, "_lock_party", times=2)
+        resp = decide(world, who, party.id, good["id"], action, **kw)
+        assert resp.status_code == 409 and code(resp) == "conflict_retry", action
+        assert world.get(cm.PartyChangeProposal, good["id"]).state == cm.ChangeState.PENDING
