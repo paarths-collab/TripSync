@@ -155,4 +155,4 @@ The application connects to PostgreSQL using:
 - **Username:** postgres
 - **Password:** `<postgres-password>` (see `docker-compose.yml` / your `.env`)
 
-Connection string: `postgresql://postgres:<postgres-password>@localhost:5433/tripsync_db`
+Connection string: `postgresql+psycopg2://postgres:<postgres-password>@localhost:5433/tripsync_db`
