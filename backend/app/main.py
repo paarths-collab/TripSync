@@ -2,7 +2,10 @@
 from fastapi import FastAPI
 from app.router import router
 from app.db.database import Base, engine
+from app.db import database as db_module
+from app.services import campus_outbox
 from contextlib import asynccontextmanager
+import asyncio
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 from app.models import user_model, pooling_model, profile_model, service_model, message_model, conversation_model, campus_model  # noqa: F401
@@ -64,6 +67,47 @@ for _handler in (file_handler, error_handler, console_handler):
 def create_db_and_tables():
     Base.metadata.create_all(bind=engine)
 
+# --- Outbox poller -----------------------------------------------------------
+# Retries party-event pushes that could not be delivered at commit time. It is
+# only an accelerator (clients reconcile via REST), so it swallows every error.
+OUTBOX_POLL_DEFAULT_SECONDS = 5.0
+logger = logging.getLogger(__name__)
+
+
+def outbox_poll_seconds() -> float:
+    """Poll interval from env OUTBOX_POLL_SECONDS (0 or negative disables)."""
+    raw = os.getenv("OUTBOX_POLL_SECONDS")
+    if raw is None or not raw.strip():
+        return OUTBOX_POLL_DEFAULT_SECONDS
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid OUTBOX_POLL_SECONDS; using %ss", OUTBOX_POLL_DEFAULT_SECONDS)
+        return OUTBOX_POLL_DEFAULT_SECONDS
+
+
+async def outbox_poll_once() -> None:
+    """One poll pass: dispatch due outbox rows with a short-lived session. Never raises
+    (except CancelledError)."""
+    try:
+        db = db_module.SessionLocal()
+        try:
+            await campus_outbox.dispatch_pending(db)
+        finally:
+            db.close()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Outbox poll failed")
+
+
+async def run_outbox_poller(interval: float) -> None:
+    """Every ``interval`` seconds run one poll pass."""
+    while True:
+        await asyncio.sleep(interval)
+        await outbox_poll_once()
+
+
 # This is a "lifespan" event handler.
 # The code within this "startup" event will run once, before the app starts receiving requests.
 @asynccontextmanager
@@ -71,8 +115,20 @@ async def lifespan(app: FastAPI):
     print("Starting up...")
     create_db_and_tables()
     print("Database tables created.")
-    yield
-    print("Shutting down...")
+    poller = None
+    interval = outbox_poll_seconds()
+    if interval > 0:
+        poller = asyncio.create_task(run_outbox_poller(interval))
+    try:
+        yield
+    finally:
+        if poller is not None:
+            poller.cancel()
+            try:
+                await poller
+            except asyncio.CancelledError:
+                pass
+        print("Shutting down...")
 
 # Create the FastAPI app instance with the lifespan event handler
 app = FastAPI(title="TripSync API", lifespan=lifespan)
