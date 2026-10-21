@@ -39,16 +39,23 @@ class ConnectionManager:
             self.active_connections.pop(user_id, None)
         logger.info("User %s disconnected from WebSocket.", user_id)
 
-    async def send_personal_message(self, message: dict, user_id: int):
-        """Send a JSON message to all of a user's sockets. Never raises."""
+    async def send_personal_message(self, message: dict, user_id: int) -> int:
+        """Send a JSON message to all of a user's sockets. Never raises.
+
+        Returns the number of sockets that accepted the message (0 if the user
+        has no live socket or every send failed).
+        """
+        delivered = 0
         for websocket in list(self.active_connections.get(user_id, [])):
             try:
                 await websocket.send_json(message)
+                delivered += 1
             except Exception as exc:  # dead/closing socket must not break callers
                 logger.warning(
                     "Dropping WebSocket for user %s after send failure: %s", user_id, exc
                 )
                 self.disconnect(user_id, websocket)
+        return delivered
 
 
 # Create a single, global instance of the manager that our app can use

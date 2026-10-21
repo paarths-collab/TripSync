@@ -5,7 +5,7 @@ from app.db.database import Base, engine
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from app.models import user_model, pooling_model, profile_model, service_model, message_model, conversation_model
+from app.models import user_model, pooling_model, profile_model, service_model, message_model, conversation_model, campus_model  # noqa: F401
 import logging
 from logging.handlers import RotatingFileHandler
 import os
