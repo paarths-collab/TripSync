@@ -69,3 +69,6 @@ Thumbs.db
 # ----------------------------------------------------------------
 *.log
 logs/
+# Pytest harness: local outputs
+.pytest_cache/
+.pytest_tripsync.db
