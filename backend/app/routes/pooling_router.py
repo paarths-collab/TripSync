@@ -1,5 +1,7 @@
 # backend/app/routes/pooling_router.py
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
@@ -11,6 +13,39 @@ from app.schemas import pooling_schema
 from app.models import user_model, pooling_model
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+def _serialize_connection(connection, user_id: int):
+    """Shape shared by GET /connections/active and GET /requests/current."""
+    if not connection:
+        return None
+
+    # Determine who is the partner and get user's own request ID
+    if connection.sender_request.user_id == user_id:
+        partner = connection.receiver_request.user
+        partner_request_id = connection.receiver_request_id
+        user_request_id = connection.sender_request_id
+    else:
+        partner = connection.sender_request.user
+        partner_request_id = connection.sender_request_id
+        user_request_id = connection.receiver_request_id
+
+    return {
+        "id": connection.id,
+        "status": connection.status,
+        "created_at": connection.created_at,
+        "user_request_id": user_request_id,
+        "partner": {
+            "id": partner.id,
+            "full_name": partner.full_name,
+            "phone_number": partner.profile.phone_number if partner.profile else None,
+            "email": partner.email,
+            "year_of_study": partner.profile.year_of_study if partner.profile else None,
+            "bio": partner.profile.bio if partner.profile else None,
+            "request_id": partner_request_id,
+        },
+    }
+
 
 @router.post("/requests", response_model=pooling_schema.PoolingMatchResponse)
 async def create_pooling_request_and_find_matches(
@@ -24,12 +59,18 @@ async def create_pooling_request_and_find_matches(
     2. Immediately searches for and returns any available matches.
     """
     # Step 1: Create the user's request
-    new_request = pooling_service.create_or_update_pooling_request(
+    new_request = await pooling_service.create_or_update_pooling_request(
         db=db, user=current_user, request_data=request_data
     )
     
-    # Step 2: Find matches for this new request (returns list of matched requests)
-    matched_requests = await pooling_service.find_matches(db=db, new_request=new_request)
+    # Step 2: Find matches for this new request (returns list of matched requests).
+    # Provider failures are explicit errors, never an empty (200) match list.
+    try:
+        matched_requests = await pooling_service.find_matches(db=db, new_request=new_request)
+    except pooling_service.MatchingProviderTimeout:
+        raise HTTPException(status_code=504, detail="Matching service timed out. Please try again.")
+    except pooling_service.MatchingProviderError:
+        raise HTTPException(status_code=502, detail="Matching service is unavailable. Please try again.")
     
     # Step 3: Convert to MatchedUser schema with request_id and connection info
     matched_users = []
@@ -46,7 +87,7 @@ async def create_pooling_request_and_find_matches(
                     pooling_model.PoolingConnection.receiver_request_id == new_request.id
                 )
             )
-        ).first()
+        ).order_by(pooling_model.PoolingConnection.id.desc()).first()
         
         connection_status = 'none'
         connection_id = None
@@ -93,22 +134,26 @@ async def send_connection_request(
     """
     Send a connection request to another user's pooling request.
     """
-    print(f"[POOLING] Send connection request from user {current_user.id} to request {connection_data.target_request_id}")
-    
-    # Get sender's active request
+    # Sender's newest open (ACTIVE/MATCHED) request
     sender_request = db.query(pooling_model.PoolingRequest).filter(
         pooling_model.PoolingRequest.user_id == current_user.id,
         pooling_model.PoolingRequest.status.in_([
             pooling_model.PoolingRequestStatus.ACTIVE,
             pooling_model.PoolingRequestStatus.MATCHED
         ])
+    ).order_by(
+        pooling_model.PoolingRequest.created_at.desc(),
+        pooling_model.PoolingRequest.id.desc(),
     ).first()
     
     if not sender_request:
-        print(f"[POOLING] ERROR: No active pooling request found for user {current_user.id}")
+        has_ride = db.query(pooling_model.PoolingRequest.id).filter(
+            pooling_model.PoolingRequest.user_id == current_user.id,
+            pooling_model.PoolingRequest.status == pooling_model.PoolingRequestStatus.CONNECTED,
+        ).first()
+        if has_ride:
+            raise HTTPException(status_code=409, detail="You already have an active ride")
         raise HTTPException(status_code=404, detail="No active pooling request found")
-    
-    print(f"[POOLING] Sender request ID: {sender_request.id}, status: {sender_request.status}")
     
     connection = await pooling_service.send_connection_request(
         db=db,
@@ -116,8 +161,6 @@ async def send_connection_request(
         receiver_request_id=connection_data.target_request_id,
         sender_user=current_user
     )
-    
-    print(f"[POOLING] Connection created successfully: {connection.id}")
     
     return {
         "message": "Connection request sent",
@@ -159,37 +202,44 @@ async def get_active_connection(
     Get the currently active (approved) connection for the user.
     Returns full details including partner information.
     """
-    connection = pooling_service.get_active_connection(db=db, user_id=current_user.id)
-    
-    if not connection:
-        return {"connection": None}
-    
-    # Determine who is the partner and get user's own request ID
-    if connection.sender_request.user_id == current_user.id:
-        partner = connection.receiver_request.user
-        partner_request_id = connection.receiver_request_id
-        user_request_id = connection.sender_request_id
-    else:
-        partner = connection.sender_request.user
-        partner_request_id = connection.sender_request_id
-        user_request_id = connection.receiver_request_id
-    
+    return {"connection": _serialize_connection(
+        pooling_service.get_active_connection(db=db, user_id=current_user.id),
+        current_user.id,
+    )}
+
+
+@router.get("/requests/current")
+async def get_current_request(
+    db: Session = Depends(get_db),
+    current_user: user_model.User = Depends(auth_service.get_current_user),
+):
+    """
+    Recovery endpoint: the caller's most recent request, its active connection (if
+    any) and whether the ride has ended (latest request CANCELLED after having an
+    APPROVED connection), for clients that missed a WebSocket event.
+    """
+    latest = pooling_service.get_latest_request(db=db, user_id=current_user.id)
+    if latest is None:
+        return {"request": None, "connection": None, "ride_ended": False}
+
+    connection = None
+    if latest.status == pooling_model.PoolingRequestStatus.CONNECTED:
+        connection = pooling_service.get_active_connection(db=db, user_id=current_user.id)
+
+    ride_ended = (
+        latest.status == pooling_model.PoolingRequestStatus.CANCELLED
+        and pooling_service.request_has_approved_connection(db=db, request_id=latest.id)
+    )
+
     return {
-        "connection": {
-            "id": connection.id,
-            "status": connection.status,
-            "created_at": connection.created_at,
-            "user_request_id": user_request_id,  # Add user's own request ID
-            "partner": {
-                "id": partner.id,
-                "full_name": partner.full_name,
-                "phone_number": partner.profile.phone_number if partner.profile else None,
-                "email": partner.email,
-                "year_of_study": partner.profile.year_of_study if partner.profile else None,
-                "bio": partner.profile.bio if partner.profile else None,
-                "request_id": partner_request_id
-            }
-        }
+        "request": {
+            "id": latest.id,
+            "status": latest.status,
+            "destination_name": latest.destination_name,
+            "created_at": latest.created_at,
+        },
+        "connection": _serialize_connection(connection, current_user.id),
+        "ride_ended": ride_ended,
     }
 
 

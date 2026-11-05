@@ -1,15 +1,12 @@
 # backend/requirements.txt
-
-fastapi
-uvicorn[standard]
-sqlalchemy
-psycopg2-binary
-python-dotenv
-pydantic-settings
-pydantic[email] 
-passlib[bcrypt]
-python-jose[cryptography]
-python-multipart  
-httpx
-geopy
-python-multipart
+fastapi==0.156.6
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.5
+psycopg2-binary==2.9.13
+python-dotenv==1.2.4
+pydantic-settings==2.16.1
+pydantic[email]==2.14.1
+python-jose[cryptography]==3.5.0
+python-multipart==0.0.32
+httpx==0.28.1
+bcrypt==5.0.0
