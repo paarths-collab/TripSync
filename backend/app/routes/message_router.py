@@ -111,7 +111,8 @@ async def find_or_create_conversation(
 ):
     """
     Find or create a conversation between current user and partner.
-    Returns conversation_id.
+    Returns conversation_id. Only available between users who share an active
+    ride (400 self, 404 unknown user, 403 otherwise).
     """
     conversation = conversation_service.find_or_create_conversation(
         db=db,

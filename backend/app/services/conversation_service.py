@@ -1,10 +1,14 @@
 # backend/app/services/conversation_service.py
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import Optional
 
 from app.models import conversation_model, user_model
+from app.services import connection_access
+
+CHAT_FORBIDDEN_DETAIL = "Chat is only available with an approved ride partner"
 
 def find_or_create_conversation(
     db: Session,
@@ -14,7 +18,20 @@ def find_or_create_conversation(
     """
     Find or create a conversation between two users.
     Ensures user1_id < user2_id for consistency (sorted user IDs).
+
+    user1_id is the caller. Raises 400 for a self-chat, 404 for an unknown
+    partner and 403 unless the two users share an active ride connection.
     """
+    if user1_id == user2_id:
+        raise HTTPException(status_code=400, detail="You cannot chat with yourself")
+
+    partner = db.query(user_model.User).filter(user_model.User.id == user2_id).first()
+    if partner is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not connection_access.users_have_active_ride(db, user1_id, user2_id):
+        raise HTTPException(status_code=403, detail=CHAT_FORBIDDEN_DETAIL)
+
     # Sort user IDs to ensure consistency
     sorted_user1 = min(user1_id, user2_id)
     sorted_user2 = max(user1_id, user2_id)

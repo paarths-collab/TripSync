@@ -8,7 +8,7 @@ from datetime import datetime
 
 from app.models import user_model, message_model, conversation_model
 from app.schemas import message_schema
-from app.services import conversation_service
+from app.services import conversation_service, connection_access
 
 def create_message(
     db: Session,
@@ -18,6 +18,8 @@ def create_message(
     """
     Create a new chat message.
     Finds or creates a conversation between the sender and receiver.
+    Raises 400 (self), 404 (unknown receiver) or 403 (no active ride) via
+    conversation_service.find_or_create_conversation.
     """
     # Get or create conversation between sender and receiver
     conversation = conversation_service.find_or_create_conversation(
@@ -73,8 +75,11 @@ def get_messages_for_conversation(
     ).filter(
         message_model.Message.conversation_id == conversation_id
     ).order_by(
-        message_model.Message.created_at.asc()
+        message_model.Message.created_at.desc(),
+        message_model.Message.id.desc()
     ).limit(limit).all()
+    # Newest `limit` messages, returned oldest-first.
+    messages.reverse()
     
     # Mark messages as read
     db.query(message_model.Message).filter(
@@ -95,7 +100,18 @@ def mark_messages_as_read(
     """
     Mark all messages from the other user as read.
     Returns the count of messages marked.
+    Raises 404 if the conversation does not exist, 403 if the user is not in it.
     """
+    conversation = db.query(conversation_model.Conversation).filter(
+        conversation_model.Conversation.id == conversation_id
+    ).first()
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if conversation.user1_id != user.id and conversation.user2_id != user.id:
+        raise HTTPException(status_code=403, detail="You are not part of this conversation")
+
     count = db.query(message_model.Message).filter(
         message_model.Message.conversation_id == conversation_id,
         message_model.Message.sender_id != user.id,
@@ -122,7 +138,10 @@ def get_recent_conversations(
         (conversation_model.Conversation.user1_id == user.id) |
         (conversation_model.Conversation.user2_id == user.id)
     ).all()
-    
+
+    # Contact details are only visible to partners on an active ride.
+    active_partner_ids = connection_access.get_active_partner_ids(db, user.id)
+
     result = []
     for conv in conversations:
         # Get the partner (the other user in the conversation)
@@ -145,15 +164,18 @@ def get_recent_conversations(
             message_model.Message.is_read == False
         ).count()
         
+        can_see_details = partner.id in active_partner_ids
+        profile = partner.profile if can_see_details else None
+
         result.append({
             "conversation_id": conv.id,
             "partner": {
                 "id": partner.id,
                 "full_name": partner.full_name,
-                "phone_number": partner.profile.phone_number if partner.profile else None,
-                "email": partner.email,
-                "year_of_study": partner.profile.year_of_study if partner.profile else None,
-                "bio": partner.profile.bio if partner.profile else None,
+                "phone_number": profile.phone_number if profile else None,
+                "email": partner.email if can_see_details else None,
+                "year_of_study": profile.year_of_study if profile else None,
+                "bio": profile.bio if profile else None,
             },
             "last_message": {
                 "content": last_message.content if last_message else None,
