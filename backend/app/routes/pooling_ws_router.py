@@ -7,7 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 
 from app.core.ws_manager import manager
-from app.services import auth_service, connection_access
+from app.services import auth_service, campus_outbox, connection_access
 from app.models import user_model
 from app.db.database import get_db
 
@@ -61,6 +61,7 @@ async def websocket_endpoint(
     )
 
     try:
+        await campus_outbox.flush_on_connect(db, user_id)
         while True:
             data = await websocket.receive_text()
 
@@ -92,10 +93,11 @@ async def websocket_endpoint(
             # session so a ride cancelled mid-socket is honoured.
             db.rollback()
             db.expire_all()
-            connection = connection_access.authorize_relay(
-                db, user_id, receiver_id, message_data.get("connection_id")
+            grant = connection_access.authorize_relay(
+                db, user_id, receiver_id,
+                message_data.get("connection_id"), message_data.get("party_id"),
             )
-            if connection is None:
+            if grant is None:
                 if not await _send_error(websocket, "not_authorized", NOT_AUTHORIZED_DETAIL):
                     break
                 continue
@@ -106,7 +108,7 @@ async def websocket_endpoint(
                     "sender_id": user_id,
                     "sender_name": user_name,
                     "content": content,
-                    "connection_id": connection.id,
+                    **connection_access.grant_ref(grant),
                     "created_at": message_data.get("created_at"),
                 },
                 receiver_id if isinstance(receiver_id, int) else int(receiver_id),
