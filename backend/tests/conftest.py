@@ -219,3 +219,196 @@ def fake_distance_matrix(monkeypatch):
         return fn
 
     return _install
+
+
+# --------------------------------------------------------------------------
+# Campus scheduling fixtures
+# --------------------------------------------------------------------------
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from app.core import campus_time  # noqa: E402
+from app.models import campus_model  # noqa: E402
+
+DEFAULT_CLOCK_START = datetime(2026, 3, 1, 4, 0, 0, tzinfo=timezone.utc)
+
+
+class FakeClock:
+    """Settable clock. `campus_time.utcnow()` returns `.now` while installed."""
+
+    def __init__(self, start=DEFAULT_CLOCK_START):
+        self.now = start
+
+    def __call__(self):
+        return self.now
+
+    def set(self, dt):
+        if dt.tzinfo is None:
+            raise ValueError("FakeClock.set needs an aware datetime")
+        self.now = dt.astimezone(timezone.utc)
+        return self.now
+
+    def advance(self, **kwargs):
+        """advance(minutes=5), advance(hours=1, seconds=3), ..."""
+        self.now = self.now + timedelta(**kwargs)
+        return self.now
+
+    def at(self, **offset):
+        """A time relative to the current fake now, e.g. clock.at(minutes=30)."""
+        return self.now + timedelta(**offset)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """Fake clock patched into campus_time.utcnow (default 2026-03-01T04:00:00Z)."""
+    fake = FakeClock()
+    monkeypatch.setattr(campus_time, "utcnow", fake)
+    return fake
+
+
+@pytest.fixture
+def landmarks(test_session_factory, college):
+    """Landmarks of the `college` fixture's college.
+
+    Returns {"campus": Main Gate (CAMPUS_POINT), "hub": Airport Terminal (HUB),
+    "campus2": Library (CAMPUS_POINT)} as detached, fully loaded rows.
+    """
+    db = test_session_factory()
+    try:
+        rows = {
+            "campus": campus_model.CampusLandmark(
+                college_id=college.id, name="Main Gate",
+                kind=campus_model.LandmarkKind.CAMPUS_POINT,
+                latitude=19.1000, longitude=72.8400, timezone="Asia/Kolkata", active=True,
+            ),
+            "hub": campus_model.CampusLandmark(
+                college_id=college.id, name="Airport Terminal",
+                kind=campus_model.LandmarkKind.HUB,
+                latitude=19.0900, longitude=72.8700, timezone="Asia/Kolkata", active=True,
+            ),
+            "campus2": campus_model.CampusLandmark(
+                college_id=college.id, name="Library",
+                kind=campus_model.LandmarkKind.CAMPUS_POINT,
+                latitude=19.1010, longitude=72.8410, timezone="Asia/Kolkata", active=True,
+            ),
+        }
+        db.add_all(rows.values())
+        db.commit()
+        for row in rows.values():
+            db.refresh(row)
+        return rows
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def make_travel_request(test_session_factory, clock):
+    """Factory building a TravelRequest relative to the fake clock.
+
+    make_travel_request(user, landmarks, *, start_offset_min, end_offset_min,
+        direction="TO_HUB", flexibility=False, arrive_by=None, status="OPEN",
+        created_ago_min=0)
+    - window = [clock.now + start_offset_min, clock.now + end_offset_min]
+    - corridor is always landmarks["campus"] <-> landmarks["hub"]
+    - arrive_by: None, an aware datetime, or minutes (int/float) after clock.now
+    - created_at = clock.now - created_ago_min, independent of departure times
+    - expires_at = latest_departure
+    Returns a detached, refreshed row.
+    """
+
+    def _make(
+        user, landmarks, *, start_offset_min, end_offset_min, direction="TO_HUB",
+        flexibility=False, arrive_by=None, status="OPEN", created_ago_min=0,
+    ):
+        now = clock.now
+        earliest = now + timedelta(minutes=start_offset_min)
+        latest = now + timedelta(minutes=end_offset_min)
+        if isinstance(arrive_by, (int, float)):
+            arrive_by = now + timedelta(minutes=arrive_by)
+        db = test_session_factory()
+        try:
+            row = campus_model.TravelRequest(
+                user_id=user.id,
+                college_id=user.college_id,
+                mode=campus_model.TravelMode.SHARED_TAXI_PARTY,
+                origin_landmark_id=landmarks["campus"].id,
+                hub_id=landmarks["hub"].id,
+                direction=campus_model.Direction(direction),
+                earliest_departure=campus_time.to_db(earliest),
+                latest_departure=campus_time.to_db(latest),
+                arrive_by=campus_time.to_db(arrive_by) if arrive_by is not None else None,
+                timezone="Asia/Kolkata",
+                flexibility_consent=flexibility,
+                expires_at=campus_time.to_db(latest),
+                status=campus_model.TravelRequestStatus(status),
+                version=1,
+                created_at=campus_time.to_db(now - timedelta(minutes=created_ago_min)),
+                updated_at=campus_time.to_db(now),
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return row
+        finally:
+            db.close()
+
+    return _make
+
+
+class WsDelivery:
+    """Recorder replacing manager.send_personal_message.
+
+    `.sent` holds (user_id, message) for messages that were "delivered"
+    (return 1); `.attempts` holds every call. The recorder is also iterable /
+    indexable / sized over `.sent`. fail_for(user_id) / fail_all() make sends
+    return 0 (nothing recorded in `.sent`); restore() delivers again.
+    """
+
+    def __init__(self):
+        self.sent = []
+        self.attempts = []
+        self._fail_all = False
+        self._fail_users = set()
+
+    def fail_for(self, user_id):
+        self._fail_users.add(user_id)
+
+    def fail_all(self):
+        self._fail_all = True
+
+    def restore(self):
+        self._fail_all = False
+        self._fail_users.clear()
+
+    async def __call__(self, message, user_id):
+        self.attempts.append((user_id, message))
+        if self._fail_all or user_id in self._fail_users:
+            return 0
+        self.sent.append((user_id, message))
+        return 1
+
+    def __iter__(self):
+        return iter(self.sent)
+
+    def __len__(self):
+        return len(self.sent)
+
+    def __getitem__(self, i):
+        return self.sent[i]
+
+
+@pytest.fixture
+def ws_delivery(monkeypatch):
+    """Patches manager.send_personal_message with a WsDelivery recorder (returns 1/0)."""
+    recorder = WsDelivery()
+    monkeypatch.setattr(manager, "send_personal_message", recorder)
+    return recorder
+
+
+def _auth_jwt(headers):
+    return headers["Authorization"].removeprefix("Bearer ")
+
+
+@pytest.fixture
+def auth_jwt():
+    """auth_jwt(headers) -> the raw JWT from an Authorization: Bearer header."""
+    return _auth_jwt

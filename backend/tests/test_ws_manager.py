@@ -136,3 +136,35 @@ def test_chat_websocket_echoes_token_subprotocol_only(client, college, make_user
         assert ws.accepted_subprotocol == "token"
         assert ws.accepted_subprotocol != jwt
 
+
+
+def test_send_personal_message_returns_number_of_accepting_sockets():
+    mgr = ConnectionManager()
+    first, second, dead = FakeSocket(), FakeSocket(), FakeSocket(fail=True)
+
+    async def scenario():
+        none_yet = await mgr.send_personal_message({"n": 0}, 1)
+        await mgr.connect(1, first)
+        await mgr.connect(1, dead)
+        await mgr.connect(1, second)
+        with_dead = await mgr.send_personal_message({"n": 1}, 1)
+        after_drop = await mgr.send_personal_message({"n": 2}, 1)
+        return none_yet, with_dead, after_drop
+
+    none_yet, with_dead, after_drop = _run(scenario())
+
+    assert none_yet == 0          # no live socket
+    assert with_dead == 2         # the failing socket does not count
+    assert after_drop == 2        # and was dropped
+    assert isinstance(with_dead, int)
+
+
+def test_send_returns_zero_when_every_socket_fails():
+    mgr = ConnectionManager()
+    dead = FakeSocket(fail=True)
+
+    async def scenario():
+        await mgr.connect(1, dead)
+        return await mgr.send_personal_message({"n": 1}, 1)
+
+    assert _run(scenario()) == 0
