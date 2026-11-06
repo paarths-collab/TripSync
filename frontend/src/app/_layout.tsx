@@ -9,7 +9,7 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <PaperProvider theme={theme}>
-        <StatusBar style="light" />
+        <StatusBar style="dark" />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(main)" />

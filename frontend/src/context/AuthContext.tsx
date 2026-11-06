@@ -119,7 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isLoading) return;
     const inAuthGroup = String(segments[0]) === '(auth)';
-    const currentScreen = segments[1]; // e.g., 'login', 'register', 'landing'
+    const currentScreen = (segments as string[])[1]; // e.g., 'login', 'register', 'landing'
     
     if (token && inAuthGroup) {
       (router as any).replace('/(main)/home');

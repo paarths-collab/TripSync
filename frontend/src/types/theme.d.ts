@@ -8,6 +8,7 @@ declare global {
         secondaryText: string;
         success: string;
         border: string;
+        primaryGradient: string[];
       };
     }
   }
