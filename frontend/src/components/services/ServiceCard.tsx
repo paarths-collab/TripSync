@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Card, Text, Avatar, Chip, useTheme, IconButton, Menu } from 'react-native-paper';
+import { Text, IconButton, Menu } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { ServicePost } from '../../services/servicesService';
 import { useAuth } from '../../context/AuthContext';
-import { Ionicons } from '@expo/vector-icons';
+import { Card, Avatar, StatusPill } from '../ui';
+import { palette, space, radius, font, Tone } from '../../constants/theme';
 
 interface ServiceCardProps {
   post: ServicePost;
@@ -30,11 +32,17 @@ const formatPostedDate = (dateString: string): string => {
   return `Posted on ${date.toLocaleDateString()}`;
 };
 
+export const serviceStatusMeta: Record<ServicePost['status'], { label: string; tone: Tone }> = {
+  open: { label: 'Open', tone: 'success' },
+  in_progress: { label: 'In progress', tone: 'info' },
+  completed: { label: 'Completed', tone: 'primary' },
+  cancelled: { label: 'Cancelled', tone: 'danger' },
+};
+
 export default function ServiceCard({ post, onPostDeleted }: ServiceCardProps) {
-  const theme = useTheme();
   const router = useRouter();
   const { user } = useAuth();
-  
+
   const [menuVisible, setMenuVisible] = useState(false);
   const openMenu = () => setMenuVisible(true);
   const closeMenu = () => setMenuVisible(false);
@@ -48,100 +56,204 @@ export default function ServiceCard({ post, onPostDeleted }: ServiceCardProps) {
 
   const handleDelete = () => {
     closeMenu();
-    onPostDeleted(post.id); 
+    onPostDeleted(post.id);
   };
-  
-  const styles = StyleSheet.create({
-    card: {
-      marginBottom: 16,
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      borderColor: theme.colors.outline,
-    },
-    header: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-    avatar: { marginRight: 12, backgroundColor: theme.colors.background },
-    headerTextContainer: { flex: 1 },
-    posterName: { fontWeight: 'bold', color: theme.colors.onSurface },
-    date: { color: theme.colors.onSurfaceVariant },
-    title: { color: theme.colors.onSurface, marginBottom: 10, lineHeight: 24, fontSize: 18 },
-    tagContainer: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
-    tag: { marginRight: 8, marginBottom: 8, backgroundColor: theme.colors.background },
-    tagText: { color: theme.colors.primary },
-    footer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, marginTop: 4, borderTopWidth: 1, borderTopColor: theme.colors.outline },
-    detailItem: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, marginRight: 10 },
-    detailText: { marginLeft: 6, color: theme.colors.onSurfaceVariant },
-  });
+
+  const posterName = post.is_anonymous ? 'Anonymous User' : post.poster?.full_name || 'User';
+  const status = serviceStatusMeta[post.status] ?? { label: post.status, tone: 'neutral' as Tone };
+  const isPaid = post.compensation_type === 'fixed_price' || post.compensation_type === 'hourly_rate';
 
   return (
     <Card style={styles.card} onPress={handleCardPress}>
-      <Card.Content>
-        <View style={styles.header}>
-          <Avatar.Icon size={40} icon="account-circle" style={styles.avatar} />
-          <View style={styles.headerTextContainer}>
-            <Text variant="bodyLarge" style={styles.posterName}>
-              {post.is_anonymous ? 'Anonymous User' : post.poster?.full_name || 'User'}
-            </Text>
-            <Text variant="bodySmall" style={styles.date}>
-              {formatPostedDate(post.created_at)}
-            </Text>
-          </View>
-          
-          {isMyPost && (
-            <Menu
-              visible={menuVisible}
-              onDismiss={closeMenu}
-              anchor={
-                <IconButton 
-                  icon="dots-vertical" 
-                  onPress={openMenu}
-                  size={24} 
-                />
-              }
-            >
-              <Menu.Item 
-                onPress={handleDelete}
-                title="Delete Post" 
-                leadingIcon="delete-outline"
-                titleStyle={{ color: '#F44336' }}
-                style={{ backgroundColor: 'rgba(244, 67, 54, 0.1)' }}
+      <View style={styles.topRow}>
+        <StatusPill label={status.label} tone={status.tone} />
+        {isMyPost && (
+          <Menu
+            visible={menuVisible}
+            onDismiss={closeMenu}
+            contentStyle={styles.menu}
+            anchor={
+              <IconButton
+                icon="dots-horizontal"
+                onPress={openMenu}
+                size={20}
+                iconColor={palette.textMuted}
+                style={styles.menuButton}
+                accessibilityLabel="Post options"
               />
-            </Menu>
+            }
+          >
+            <Menu.Item
+              onPress={handleDelete}
+              title="Delete post"
+              leadingIcon="delete-outline"
+              titleStyle={{ color: palette.danger }}
+            />
+          </Menu>
+        )}
+      </View>
+
+      <Text style={styles.title} numberOfLines={2}>{post.title}</Text>
+      {!!post.description && (
+        <Text style={styles.description} numberOfLines={2}>{post.description}</Text>
+      )}
+
+      {post.tags && post.tags.length > 0 && (
+        <View style={styles.tagRow}>
+          {post.tags.slice(0, 3).map(tag => (
+            <View key={tag.id} style={styles.tag}>
+              <Text style={styles.tagText}>{tag.name}</Text>
+            </View>
+          ))}
+          {post.tags.length > 3 && (
+            <Text style={styles.moreTags}>+{post.tags.length - 3}</Text>
           )}
         </View>
+      )}
 
-        <Text variant="titleLarge" style={styles.title}>{post.title}</Text>
-        
-        {post.tags && post.tags.length > 0 && (
-          <View style={styles.tagContainer}>
-            {post.tags.slice(0, 3).map(tag => (
-              <Chip key={tag.id} style={styles.tag} textStyle={styles.tagText}>
-                {tag.name}
-              </Chip>
-            ))}
+      <View style={styles.metaRow}>
+        <View style={[styles.price, isPaid && styles.pricePaid]}>
+          <Ionicons
+            name="cash-outline"
+            size={14}
+            color={isPaid ? palette.success : palette.textMuted}
+          />
+          <Text style={[styles.priceText, isPaid && styles.priceTextPaid]}>
+            {formatCompensation(post.compensation_type, post.compensation_amount)}
+          </Text>
+        </View>
+        <View style={styles.metaItem}>
+          <Ionicons name="people-outline" size={14} color={palette.textMuted} />
+          <Text style={styles.metaText}>{post.team_size} {post.team_size === 1 ? "person" : "people"}</Text>
+        </View>
+        {post.deadline && (
+          <View style={styles.metaItem}>
+            <Ionicons name="calendar-outline" size={14} color={palette.textMuted} />
+            <Text style={styles.metaText}>{new Date(post.deadline).toLocaleDateString()}</Text>
           </View>
         )}
+      </View>
 
-        <View style={styles.footer}>
-          <View style={styles.detailItem}>
-            <Ionicons name="cash-outline" size={16} color={theme.colors.onSurfaceVariant} />
-            <Text style={styles.detailText}>
-              {formatCompensation(post.compensation_type, post.compensation_amount)}
-            </Text>
-          </View>
-          <View style={styles.detailItem}>
-            <Ionicons name="people-outline" size={16} color={theme.colors.onSurfaceVariant} />
-            <Text style={styles.detailText}>{post.team_size} Person</Text>
-          </View>
-          {post.deadline && (
-            <View style={styles.detailItem}>
-              <Ionicons name="calendar-outline" size={16} color={theme.colors.onSurfaceVariant} />
-              <Text style={styles.detailText}>
-                {new Date(post.deadline).toLocaleDateString()}
-              </Text>
-            </View>
-          )}
+      <View style={styles.footer}>
+        <Avatar name={post.is_anonymous ? null : posterName} size={28} />
+        <View style={styles.footerText}>
+          <Text style={styles.posterName} numberOfLines={1}>{posterName}</Text>
+          <Text style={styles.date}>{formatPostedDate(post.created_at)}</Text>
         </View>
-      </Card.Content>
+        <Ionicons name="chevron-forward" size={18} color={palette.textFaint} />
+      </View>
     </Card>
   );
 }
+
+const styles = StyleSheet.create({
+  card: {
+    marginBottom: space.sm,
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 28,
+    marginBottom: space.xs,
+  },
+  menuButton: {
+    margin: 0,
+    marginRight: -space.xs,
+  },
+  menu: {
+    backgroundColor: palette.surface,
+    borderRadius: radius.md,
+  },
+  title: {
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: font.semibold,
+    color: palette.text,
+  },
+  description: {
+    marginTop: space.xxs,
+    fontSize: 14,
+    lineHeight: 20,
+    color: palette.textMuted,
+  },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space.xs,
+    marginTop: space.sm,
+  },
+  tag: {
+    paddingHorizontal: space.xs,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+    backgroundColor: palette.primarySoft,
+  },
+  tagText: {
+    fontSize: 12,
+    fontWeight: font.medium,
+    color: palette.primaryDark,
+  },
+  moreTags: {
+    fontSize: 12,
+    color: palette.textMuted,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space.sm,
+    marginTop: space.sm,
+  },
+  price: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: space.xs,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+    backgroundColor: palette.surfaceMuted,
+  },
+  pricePaid: {
+    backgroundColor: palette.successSoft,
+  },
+  priceText: {
+    marginLeft: space.xxs,
+    fontSize: 13,
+    fontWeight: font.semibold,
+    color: palette.textMuted,
+  },
+  priceTextPaid: {
+    color: palette.success,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  metaText: {
+    marginLeft: space.xxs,
+    fontSize: 13,
+    color: palette.textMuted,
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: space.md,
+    paddingTop: space.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.border,
+  },
+  footerText: {
+    flex: 1,
+    marginLeft: space.xs,
+  },
+  posterName: {
+    fontSize: 13,
+    fontWeight: font.semibold,
+    color: palette.text,
+  },
+  date: {
+    fontSize: 12,
+    color: palette.textFaint,
+  },
+});

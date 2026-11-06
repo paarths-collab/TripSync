@@ -1,22 +1,23 @@
 // src/app/(main)/profile.tsx
 import { useState, useCallback } from 'react';
 import { Alert, StyleSheet, ScrollView, View, StatusBar } from 'react-native';
-import { Text, TextInput, Button, ActivityIndicator, Avatar } from 'react-native-paper';
+import { Text, TextInput, Button } from 'react-native-paper';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import ScreenWrapper from '../../components/ScreenWrapper';
 import { getMyProfile, updateMyProfile, UserProfile } from '../../services/profileService';
 import { useAuth } from '../../context/AuthContext';
-
-const COLORS = {
-  primary: '#6A5AE0',
-  primaryLight: '#E8E5FA',
-  white: '#FFFFFF',
-  text: '#0D0D0D',
-  textSecondary: '#6C757D',
-  border: '#E9ECEF',
-};
+import { palette, space, radius, font } from '../../constants/theme';
+import {
+  Avatar,
+  Card,
+  EmptyState,
+  InfoRow,
+  LoadingState,
+  ScreenHeader,
+  SectionTitle,
+} from '../../components/ui';
 
 export default function ProfileScreen() {
   const { signOut } = useAuth();
@@ -24,6 +25,7 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   // State for editable fields
   const [fullName, setFullName] = useState('');
@@ -70,136 +72,197 @@ export default function ProfileScreen() {
     }
   };
 
+  // Discard unsaved edits and go back to the saved values.
+  const handleCancelEdit = () => {
+    if (profile) {
+      setFullName(profile.full_name);
+      setUsername(profile.username || '');
+      setPhoneNumber(profile.phone_number || '');
+      setBio(profile.bio || '');
+      setYearOfStudy(profile.year_of_study || '');
+    }
+    setIsEditing(false);
+  };
+
   if (isLoading) {
     return (
-      <ScreenWrapper style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
+      <ScreenWrapper>
+        <LoadingState label="Loading your profile…" style={styles.fill} />
       </ScreenWrapper>
     );
   }
 
   if (!profile) {
     return (
-      <ScreenWrapper style={styles.loadingContainer}>
-        <Text style={styles.errorText}>Could not load profile.</Text>
+      <ScreenWrapper>
+        <EmptyState
+          icon="person-circle-outline"
+          title="Couldn't load your profile"
+          body="Check your connection and try again."
+          style={styles.fill}
+          action={
+            <Button mode="contained" onPress={fetchProfile}>
+              Try again
+            </Button>
+          }
+        />
       </ScreenWrapper>
     );
   }
 
+  const inputProps = {
+    mode: 'outlined' as const,
+    style: styles.input,
+    outlineColor: palette.border,
+    activeOutlineColor: palette.primary,
+    outlineStyle: styles.inputOutline,
+  };
+
   return (
-    <ScreenWrapper style={styles.wrapper}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
-      <ScrollView 
-        contentContainerStyle={styles.container} 
+    <ScreenWrapper>
+      <StatusBar barStyle="dark-content" backgroundColor={palette.background} />
+      <ScrollView
+        contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Header Section */}
-        <View style={styles.header}>
-          <View style={styles.avatarContainer}>
-            <Avatar.Icon 
-              size={100} 
-              icon="account" 
-              style={styles.avatar}
-              color={COLORS.primary}
-            />
-          </View>
-          <Text variant="headlineMedium" style={styles.name}>{fullName}</Text>
-          <View style={styles.collegeContainer}>
-            <Ionicons name="school" size={16} color={COLORS.textSecondary} />
-            <Text variant="bodyMedium" style={styles.college}>{profile.college_name}</Text>
-          </View>
-        </View>
+        <ScreenHeader title="Profile" style={styles.screenHeader} />
 
-        {/* Profile Info Card */}
-        <View style={styles.card}>
-          <Text variant="titleMedium" style={styles.sectionTitle}>
-            Profile Information
-          </Text>
-          
-          <TextInput 
-            label="Full Name" 
-            value={fullName} 
-            onChangeText={setFullName} 
-            mode="outlined" 
-            style={styles.input}
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.primary}
-            left={<TextInput.Icon icon="account" color={COLORS.primary} />}
-          />
-          
-          <TextInput 
-            label="Username" 
-            value={username} 
-            onChangeText={setUsername} 
-            mode="outlined" 
-            style={styles.input} 
-            autoCapitalize="none"
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.primary}
-            left={<TextInput.Icon icon="at" color={COLORS.primary} />}
-          />
-          
-          <TextInput 
-            label="Phone Number" 
-            value={phoneNumber} 
-            onChangeText={setPhoneNumber} 
-            mode="outlined" 
-            style={styles.input} 
-            keyboardType="phone-pad"
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.primary}
-            left={<TextInput.Icon icon="phone" color={COLORS.primary} />}
-          />
-          
-          <TextInput 
-            label="Year of Study" 
-            value={yearOfStudy} 
-            onChangeText={setYearOfStudy} 
-            mode="outlined" 
-            style={styles.input}
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.primary}
-            left={<TextInput.Icon icon="calendar" color={COLORS.primary} />}
-          />
-          
-          <TextInput 
-            label="Bio" 
-            value={bio} 
-            onChangeText={setBio} 
-            mode="outlined" 
-            style={styles.input} 
-            multiline 
-            numberOfLines={4}
-            outlineColor={COLORS.border}
-            activeOutlineColor={COLORS.primary}
-            left={<TextInput.Icon icon="text" color={COLORS.primary} />}
-          />
-        </View>
-        
-        {/* Action Buttons */}
-        <Button 
-          mode="contained" 
-          onPress={handleSaveChanges} 
-          style={styles.saveButton}
-          contentStyle={styles.buttonContent}
-          labelStyle={styles.buttonLabel}
-          loading={isSaving} 
-          disabled={isSaving}
-          icon={({ size, color }) => <Ionicons name="checkmark-circle" size={size} color={color} />}
-        >
-          Save Changes
-        </Button>
-        
-        <Button 
-          mode="outlined" 
-          onPress={signOut} 
+        {/* Identity card */}
+        <Card style={styles.identityCard}>
+          <Avatar name={profile.full_name} size={72} />
+          <View style={styles.identityText}>
+            <Text style={styles.name} numberOfLines={2}>
+              {profile.full_name}
+            </Text>
+            {profile.username ? (
+              <Text style={styles.handle} numberOfLines={1}>
+                @{profile.username}
+              </Text>
+            ) : null}
+            <View style={styles.metaRow}>
+              <Ionicons name="mail-outline" size={14} color={palette.textMuted} />
+              <Text style={styles.metaText} numberOfLines={1}>
+                {profile.email}
+              </Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Ionicons name="school-outline" size={14} color={palette.textMuted} />
+              <Text style={styles.metaText} numberOfLines={2}>
+                {profile.college_name}
+              </Text>
+            </View>
+          </View>
+        </Card>
+
+        {/* Details / edit */}
+        <SectionTitle
+          title={isEditing ? 'Edit details' : 'Details'}
+          style={styles.sectionTitle}
+          action={
+            isEditing ? null : (
+              <Button
+                mode="text"
+                compact
+                onPress={() => setIsEditing(true)}
+                icon={({ size, color }) => <Ionicons name="create-outline" size={size} color={color} />}
+              >
+                Edit
+              </Button>
+            )
+          }
+        />
+
+        {isEditing ? (
+          <Card style={styles.card}>
+            <TextInput
+              label="Full name"
+              value={fullName}
+              onChangeText={setFullName}
+              left={<TextInput.Icon icon="account-outline" color={palette.textMuted} />}
+              {...inputProps}
+            />
+            <TextInput
+              label="Username"
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              left={<TextInput.Icon icon="at" color={palette.textMuted} />}
+              {...inputProps}
+            />
+            <TextInput
+              label="Phone number"
+              value={phoneNumber}
+              onChangeText={setPhoneNumber}
+              keyboardType="phone-pad"
+              left={<TextInput.Icon icon="phone-outline" color={palette.textMuted} />}
+              {...inputProps}
+            />
+            <TextInput
+              label="Year of study"
+              value={yearOfStudy}
+              onChangeText={setYearOfStudy}
+              left={<TextInput.Icon icon="calendar-outline" color={palette.textMuted} />}
+              {...inputProps}
+            />
+            <TextInput
+              label="Bio"
+              value={bio}
+              onChangeText={setBio}
+              multiline
+              numberOfLines={4}
+              left={<TextInput.Icon icon="text" color={palette.textMuted} />}
+              {...inputProps}
+            />
+
+            <View style={styles.editActions}>
+              <Button
+                mode="outlined"
+                onPress={handleCancelEdit}
+                disabled={isSaving}
+                style={styles.editActionButton}
+                contentStyle={styles.buttonContent}
+                textColor={palette.textMuted}
+              >
+                Cancel
+              </Button>
+              <Button
+                mode="contained"
+                onPress={handleSaveChanges}
+                loading={isSaving}
+                disabled={isSaving}
+                style={styles.editActionButton}
+                contentStyle={styles.buttonContent}
+                labelStyle={styles.buttonLabel}
+              >
+                Save changes
+              </Button>
+            </View>
+          </Card>
+        ) : (
+          <Card style={styles.card}>
+            <InfoRow icon="person-outline" label="Full name" value={profile.full_name} />
+            <View style={styles.divider} />
+            <InfoRow icon="at-outline" label="Username" value={profile.username} />
+            <View style={styles.divider} />
+            <InfoRow icon="call-outline" label="Phone number" value={profile.phone_number} />
+            <View style={styles.divider} />
+            <InfoRow icon="calendar-outline" label="Year of study" value={profile.year_of_study} />
+            <View style={styles.divider} />
+            <InfoRow icon="document-text-outline" label="Bio" value={profile.bio} />
+          </Card>
+        )}
+
+        <Button
+          mode="outlined"
+          onPress={signOut}
           style={styles.logoutButton}
           contentStyle={styles.buttonContent}
-          labelStyle={styles.logoutButtonLabel}
-          icon={({ size }) => <Ionicons name="log-out" size={size} color={COLORS.primary} />}
+          labelStyle={styles.buttonLabel}
+          textColor={palette.danger}
+          icon={({ size }) => <Ionicons name="log-out-outline" size={size} color={palette.danger} />}
         >
-          Logout
+          Log out
         </Button>
       </ScrollView>
     </ScreenWrapper>
@@ -207,105 +270,89 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
+  fill: {
     flex: 1,
-    backgroundColor: COLORS.white,
   },
-  container: { 
-    padding: 24, 
-    paddingBottom: 50,
+  container: {
+    paddingHorizontal: space.lg,
+    paddingBottom: space.xxxl,
   },
-  loadingContainer: { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
+  screenHeader: {
+    paddingHorizontal: 0,
   },
-  errorText: {
-    color: COLORS.textSecondary,
-    fontSize: 16,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 32,
-    marginTop: 20,
-  },
-  avatarContainer: {
-    marginBottom: 16,
-    elevation: 4,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    borderRadius: 50,
-  },
-  avatar: { 
-    backgroundColor: COLORS.primaryLight,
-  },
-  name: { 
-    textAlign: 'center',
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 8,
-  },
-  collegeContainer: {
+  identityCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    padding: space.lg,
+    marginTop: space.xs,
   },
-  college: { 
-    textAlign: 'center',
-    color: COLORS.textSecondary,
+  identityText: {
+    flex: 1,
+    marginLeft: space.md,
   },
-  card: {
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  name: {
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: font.bold,
+    color: palette.text,
+  },
+  handle: {
+    fontSize: 14,
+    color: palette.primary,
+    fontWeight: font.medium,
+    marginTop: 2,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xxs + 2,
+    marginTop: space.xxs + 2,
+  },
+  metaText: {
+    flex: 1,
+    fontSize: 13,
+    color: palette.textMuted,
   },
   sectionTitle: {
-    fontWeight: '600',
-    color: COLORS.primary,
-    marginBottom: 20,
+    marginTop: space.xl,
+    marginBottom: space.xs,
   },
-  input: { 
-    marginBottom: 16,
-    backgroundColor: COLORS.white,
+  card: {
+    paddingVertical: space.xs,
   },
-  saveButton: { 
-    marginTop: 8,
-    marginBottom: 12,
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    elevation: 2,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: palette.border,
+    marginLeft: 18 + space.sm,
+  },
+  input: {
+    marginVertical: space.xs,
+    backgroundColor: palette.surface,
+  },
+  inputOutline: {
+    borderRadius: radius.md,
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: space.sm,
+    marginTop: space.sm,
+    marginBottom: space.xs,
+  },
+  editActionButton: {
+    flex: 1,
+    borderRadius: radius.md,
   },
   logoutButton: {
-    borderRadius: 12,
-    borderColor: COLORS.primary,
-    borderWidth: 1.5,
+    marginTop: space.xxl,
+    borderRadius: radius.md,
+    borderColor: palette.danger,
+    borderWidth: 1,
   },
   buttonContent: {
-    height: 50,
+    height: 48,
   },
   buttonLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.white,
-  },
-  logoutButtonLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.primary,
+    fontSize: 15,
+    fontWeight: font.semibold,
   },
 });

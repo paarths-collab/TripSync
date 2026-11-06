@@ -1,139 +1,58 @@
 import React, { useState, useCallback } from 'react';
 import { View, StyleSheet, FlatList, Alert } from 'react-native';
-import { Text, SegmentedButtons, ActivityIndicator, Card, Button, useTheme, Avatar, Badge } from 'react-native-paper';
+import { Text, SegmentedButtons, Button } from 'react-native-paper';
 import { useFocusEffect, useRouter } from 'expo-router';
 import ScreenWrapper from '../../../components/ScreenWrapper';
 import { useAuth } from '../../../context/AuthContext';
 import { getMyServicePosts, getMyApplications, ServicePost, ServiceApplication } from '../../../services/servicesService';
 import { Ionicons } from '@expo/vector-icons';
+import { serviceStatusMeta } from '../../../components/services/ServiceCard';
+import { Card, StatusPill, SectionTitle, EmptyState, LoadingState } from '../../../components/ui';
+import { palette, space, radius, font, Tone } from '../../../constants/theme';
 
-// A stylish card component for the "My Posts" tab
-const MyPostCard = ({ post, index }: { post: ServicePost; index: number }) => {
-    const theme = useTheme();
+const applicationStatusMeta: Record<ServiceApplication['status'], { label: string; tone: Tone; icon: 'time-outline' | 'checkmark-circle' | 'close-circle' }> = {
+    pending: { label: 'Pending', tone: 'warning', icon: 'time-outline' },
+    accepted: { label: 'Accepted', tone: 'success', icon: 'checkmark-circle' },
+    rejected: { label: 'Rejected', tone: 'danger', icon: 'close-circle' },
+};
+
+// Card for the "My Posts" tab
+const MyPostCard = ({ post }: { post: ServicePost; index: number }) => {
     const router = useRouter();
-  // Animations removed: render statically for simpler UI and performance
-    
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'open': return '#28A745'; // Success green
-            case 'in_progress': return theme.colors.primary;
-            case 'completed': return '#F9A826'; // Accent gold
-            case 'cancelled': return theme.colors.error;
-            default: return theme.colors.onSurfaceVariant;
-        }
-    };
+    const status = serviceStatusMeta[post.status] ?? { label: post.status, tone: 'neutral' as Tone };
 
-    const getStatusIcon = (status: string) => {
-        switch (status) {
-            case 'open': return 'check-circle-outline';
-            case 'in_progress': return 'clock-outline';
-            case 'completed': return 'checkmark-done-circle-outline';
-            case 'cancelled': return 'close-circle-outline';
-            default: return 'help-circle-outline';
-        }
-    };
-
-  return (
-    <View>
-      <Card 
-                style={{ 
-                    marginBottom: 16, 
-                    backgroundColor: theme.colors.surface,
-                    elevation: 4,
-                    borderRadius: 20,
-                    borderLeftWidth: 6,
-                    borderLeftColor: getStatusColor(post.status),
-                    shadowColor: getStatusColor(post.status),
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.15,
-                    shadowRadius: 8,
-                }}
-                mode="elevated"
+    return (
+        <Card style={styles.card}>
+            <View style={styles.cardTop}>
+                <StatusPill label={status.label} tone={status.tone} />
+                <View style={styles.metaItem}>
+                    <Ionicons name="people-outline" size={14} color={palette.textMuted} />
+                    <Text style={styles.metaText}>Team of {post.team_size}</Text>
+                </View>
+            </View>
+            <Text style={styles.cardTitle} numberOfLines={2}>{post.title}</Text>
+            {!!post.description && (
+                <Text style={styles.cardBody} numberOfLines={2}>{post.description}</Text>
+            )}
+            <Button
+                mode="contained-tonal"
+                icon="account-group-outline"
+                onPress={() => router.push(`/(main)/services/applicants/${post.id}` as any)}
+                style={styles.cardButton}
+                buttonColor={palette.primarySoft}
+                textColor={palette.primaryDark}
+                labelStyle={styles.cardButtonLabel}
             >
-                <Card.Title
-                    title={post.title}
-                    titleVariant="titleMedium"
-                    titleStyle={{ fontWeight: '700', color: theme.colors.onSurface, fontSize: 18 }}
-                    subtitle={`Status: ${post.status} • Team Size: ${post.team_size} members`}
-                    subtitleStyle={{ color: theme.colors.onSurfaceVariant, marginTop: 6, fontSize: 14 }}
-                    left={(props) => (
-                        <Avatar.Icon 
-                            {...props} 
-                            size={50}
-                            icon={getStatusIcon(post.status)}
-                            style={{ 
-                                backgroundColor: getStatusColor(post.status) + '20',
-                                borderWidth: 2,
-                                borderColor: getStatusColor(post.status) + '40',
-                            }}
-                        />
-                    )}
-                    right={(props) => (
-                        <Badge 
-                            {...props} 
-                            style={{ 
-                                marginRight: 16, 
-                                backgroundColor: getStatusColor(post.status),
-                                color: '#FFFFFF',
-                                borderRadius: 20,
-                                paddingHorizontal: 12,
-                                paddingVertical: 4,
-                            }}
-                        >
-                            {post.status.toUpperCase()}
-                        </Badge>
-                    )}
-                />
-                <Card.Content style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-                    <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 14, lineHeight: 20 }}>
-                        {post.description?.substring(0, 100)}...
-                    </Text>
-                </Card.Content>
-                <Card.Actions style={{ paddingHorizontal: 16, paddingBottom: 16, paddingTop: 8 }}>
-                    <Button 
-                        mode="contained"
-                        icon="account-group-outline"
-                        onPress={() => router.push(`/(main)/services/applicants/${post.id}` as any)}
-                        style={{ 
-                            borderRadius: 16,
-                            backgroundColor: theme.colors.primary,
-                            elevation: 2,
-                            flex: 1,
-                        }}
-                        labelStyle={{ color: '#FFFFFF', fontWeight: '600', fontSize: 15 }}
-                        contentStyle={{ paddingVertical: 8 }}
-                    >
-                        View Applicants
-                    </Button>
-                </Card.Actions>
-      </Card>
-    </View>
+                View applicants
+            </Button>
+        </Card>
     );
 };
 
-// A stylish card component for the "My Applications" tab
-const MyApplicationCard = ({ application, index }: { application: ServiceApplication; index: number }) => {
-    const theme = useTheme();
+// Card for the "My Applications" tab
+const MyApplicationCard = ({ application }: { application: ServiceApplication; index: number }) => {
     const router = useRouter();
-  // Animations removed: render statically for simpler UI and performance
-    
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'accepted': return '#28A745'; // Success green
-            case 'rejected': return theme.colors.error;
-            case 'pending': return theme.colors.primary;
-            default: return theme.colors.onSurfaceVariant;
-        }
-    };
-
-    const getStatusIcon = (status: string) => {
-        switch (status) {
-            case 'accepted': return 'checkmark-circle';
-            case 'rejected': return 'close-circle';
-            case 'pending': return 'time';
-            default: return 'help-circle';
-        }
-    };
+    const meta = applicationStatusMeta[application.status] ?? { label: application.status, tone: 'neutral' as Tone, icon: 'time-outline' as const };
 
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleDateString('en-US', {
@@ -143,88 +62,33 @@ const MyApplicationCard = ({ application, index }: { application: ServiceApplica
         });
     };
 
-  return (
-    <View>
-      <Card 
-                style={{ 
-                    marginBottom: 16, 
-                    backgroundColor: theme.colors.surface,
-                    elevation: 4,
-                    borderRadius: 20,
-                    borderLeftWidth: 6,
-                    borderLeftColor: getStatusColor(application.status),
-                    shadowColor: getStatusColor(application.status),
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.15,
-                    shadowRadius: 8,
-                }} 
-                onPress={() => router.push(`/(main)/services/${application.service_post.id}` as any)}
-                mode="elevated"
-            >
-                <Card.Title
-                    title={application.service_post.title}
-                    titleVariant="titleMedium"
-                    titleStyle={{ fontWeight: '700', color: theme.colors.onSurface, fontSize: 18 }}
-                    subtitle={`Applied on ${formatDate(application.application_date)}`}
-                    subtitleStyle={{ 
-                        color: theme.colors.onSurfaceVariant, 
-                        marginTop: 6,
-                        fontSize: 14
-                    }}
-                    left={(props) => (
-                        <Avatar.Icon 
-                            {...props} 
-                            size={50}
-                            icon={getStatusIcon(application.status)}
-                            style={{ 
-                                backgroundColor: getStatusColor(application.status) + '20',
-                                borderWidth: 2,
-                                borderColor: getStatusColor(application.status) + '40',
-                            }}
-                        />
-                    )}
-                    right={(props) => (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
-                            <Badge 
-                                style={{ 
-                                    backgroundColor: getStatusColor(application.status),
-                                    color: '#FFFFFF',
-                                    borderRadius: 20,
-                                    paddingHorizontal: 12,
-                                    paddingVertical: 4,
-                                    marginRight: 8,
-                                }}
-                            >
-                                {application.status.toUpperCase()}
-                            </Badge>
-                            <Ionicons 
-                                name="chevron-forward" 
-                                size={24} 
-                                color={theme.colors.onSurfaceVariant} 
-                            />
-                        </View>
-                    )}
-                />
-                {application.cover_letter && (
-                    <Card.Content style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
-                        <Text style={{ 
-                            color: theme.colors.onSurfaceVariant, 
-                            fontSize: 14, 
-                            lineHeight: 20,
-                            fontStyle: 'italic' 
-                        }}>
-                            "{application.cover_letter.substring(0, 80)}..."
-                        </Text>
-                    </Card.Content>
-                )}
-      </Card>
-    </View>
+    return (
+        <Card
+            style={styles.card}
+            onPress={() => router.push(`/(main)/services/${application.service_post.id}` as any)}
+        >
+            <View style={styles.cardTop}>
+                <StatusPill label={meta.label} tone={meta.tone} icon={meta.icon} />
+                <Ionicons name="chevron-forward" size={18} color={palette.textFaint} />
+            </View>
+            <Text style={styles.cardTitle} numberOfLines={2}>{application.service_post.title}</Text>
+            <View style={[styles.metaItem, styles.appliedOn]}>
+                <Ionicons name="calendar-outline" size={14} color={palette.textMuted} />
+                <Text style={styles.metaText}>Applied on {formatDate(application.application_date)}</Text>
+            </View>
+            {application.cover_letter && (
+                <View style={styles.quote}>
+                    <Text style={styles.quoteText} numberOfLines={2}>
+                        {application.cover_letter}
+                    </Text>
+                </View>
+            )}
+        </Card>
     );
 };
 
 
 export default function ServicesDashboard() {
-  const theme = useTheme();
   const { token } = useAuth();
   const [tab, setTab] = useState<'my-posts' | 'my-applications'>('my-posts');
   const [myPosts, setMyPosts] = useState<ServicePost[]>([]);
@@ -261,65 +125,13 @@ export default function ServicesDashboard() {
     }, [token, tab]) // The effect re-runs when the token or the selected tab changes
   );
 
-  const styles = StyleSheet.create({
-    container: { 
-      flex: 1, 
-      backgroundColor: theme.colors.background 
-    },
-    segmentContainer: { 
-      padding: 20, 
-      backgroundColor: theme.colors.surface,
-      borderBottomWidth: 1, 
-      borderBottomColor: theme.colors.outline,
-      elevation: 2,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-    },
-    listContent: { 
-      padding: 20,
-      paddingBottom: 40,
-    },
-    center: { 
-      flex: 1, 
-      justifyContent: 'center', 
-      alignItems: 'center', 
-      padding: 40,
-      backgroundColor: theme.colors.surface,
-      margin: 20,
-      borderRadius: 16,
-      elevation: 1,
-    },
-    emptyIcon: { 
-      marginBottom: 20,
-      opacity: 0.6,
-    },
-    emptyText: { 
-      color: theme.colors.onSurfaceVariant, 
-      marginTop: 12, 
-      textAlign: 'center',
-      fontSize: 16,
-      lineHeight: 22,
-      paddingHorizontal: 20,
-    },
-    loadingContainer: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: theme.colors.background,
-    },
-  });
-  
   const renderContent = () => {
     if (isLoading) {
       return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Text style={{ marginTop: 16, color: theme.colors.onSurfaceVariant }}>
-            Loading your {tab === 'my-posts' ? 'posts' : 'applications'}...
-          </Text>
-        </View>
+        <LoadingState
+          style={styles.fill}
+          label={`Loading your ${tab === 'my-posts' ? 'posts' : 'applications'}...`}
+        />
       );
     }
 
@@ -331,16 +143,17 @@ export default function ServicesDashboard() {
           contentContainerStyle={styles.listContent}
           renderItem={({ item, index }) => <MyPostCard post={item} index={index} />}
           showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            myPosts.length > 0 ? (
+              <SectionTitle title={`My posts · ${myPosts.length}`} />
+            ) : null
+          }
           ListEmptyComponent={
-            <View style={styles.center}>
-                <Ionicons name="document-text-outline" size={64} color={theme.colors.onSurfaceVariant} style={styles.emptyIcon} />
-                <Text variant="headlineSmall" style={{ fontWeight: '600', marginBottom: 8, color: theme.colors.onSurface }}>
-                  No service posts yet
-                </Text>
-                <Text style={styles.emptyText}>
-                  Ready to share your skills? Tap the '+' button on the main screen to create your first service post and start connecting with people who need your expertise.
-                </Text>
-            </View>
+            <EmptyState
+              icon="document-text-outline"
+              title="No service posts yet"
+              body="Tap New service on the Services screen to post your first one."
+            />
           }
         />
       );
@@ -354,16 +167,17 @@ export default function ServicesDashboard() {
           contentContainerStyle={styles.listContent}
           renderItem={({ item, index }) => <MyApplicationCard application={item} index={index} />}
           showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            myApplications.length > 0 ? (
+              <SectionTitle title={`My applications · ${myApplications.length}`} />
+            ) : null
+          }
           ListEmptyComponent={
-            <View style={styles.center}>
-                <Ionicons name="file-tray-outline" size={64} color={theme.colors.onSurfaceVariant} style={styles.emptyIcon} />
-                <Text variant="headlineSmall" style={{ fontWeight: '600', marginBottom: 8, color: theme.colors.onSurface }}>
-                  No applications yet
-                </Text>
-                <Text style={styles.emptyText}>
-                  Start exploring available services and submit your applications. Your application history will appear here to help you track your progress.
-                </Text>
-            </View>
+            <EmptyState
+              icon="file-tray-outline"
+              title="No applications yet"
+              body="Browse open services and apply. Your applications will show up here."
+            />
           }
         />
       );
@@ -378,13 +192,106 @@ export default function ServicesDashboard() {
           value={tab}
           onValueChange={(value) => setTab(value as any)}
           buttons={[
-            { value: 'my-posts', label: 'My Posts', icon: 'post-outline' },
-            { value: 'my-applications', label: 'My Applications', icon: 'file-check-outline' },
+            {
+              value: 'my-posts',
+              label: 'My posts',
+              icon: 'post-outline',
+              style: [styles.segment, tab === 'my-posts' && styles.segmentActive],
+              checkedColor: palette.primaryDark,
+              uncheckedColor: palette.textMuted,
+            },
+            {
+              value: 'my-applications',
+              label: 'My applications',
+              icon: 'file-check-outline',
+              style: [styles.segment, tab === 'my-applications' && styles.segmentActive],
+              checkedColor: palette.primaryDark,
+              uncheckedColor: palette.textMuted,
+            },
           ]}
-          style={{ borderRadius: 12 }}
+          density="regular"
         />
       </View>
       {renderContent()}
     </ScreenWrapper>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: palette.background },
+  fill: { flex: 1 },
+  segmentContainer: {
+    paddingHorizontal: space.md,
+    paddingTop: space.xs,
+    paddingBottom: space.sm,
+    backgroundColor: palette.background,
+  },
+  segment: {
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+  },
+  segmentActive: {
+    backgroundColor: palette.primarySoft,
+  },
+  listContent: {
+    paddingHorizontal: space.md,
+    paddingTop: space.xs,
+    paddingBottom: space.xxl,
+    flexGrow: 1,
+  },
+  card: {
+    marginBottom: space.sm,
+  },
+  cardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: space.xs,
+  },
+  cardTitle: {
+    fontSize: 17,
+    lineHeight: 23,
+    fontWeight: font.semibold,
+    color: palette.text,
+  },
+  cardBody: {
+    marginTop: space.xxs,
+    fontSize: 14,
+    lineHeight: 20,
+    color: palette.textMuted,
+  },
+  cardButton: {
+    marginTop: space.md,
+    borderRadius: radius.md,
+  },
+  cardButtonLabel: {
+    fontWeight: font.semibold,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  metaText: {
+    marginLeft: space.xxs,
+    fontSize: 13,
+    color: palette.textMuted,
+  },
+  appliedOn: {
+    marginTop: space.xxs,
+  },
+  quote: {
+    marginTop: space.sm,
+    paddingVertical: space.xs,
+    paddingHorizontal: space.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: palette.primarySoft,
+    backgroundColor: palette.surfaceMuted,
+    borderRadius: radius.sm,
+  },
+  quoteText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: palette.textMuted,
+    fontStyle: 'italic',
+  },
+});

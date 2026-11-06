@@ -1,18 +1,10 @@
 // src/components/pooling/ActiveConnectionModal.tsx
 import React, { useState } from 'react';
 import { View, StyleSheet, Alert } from 'react-native';
-import { Text, Button, Portal, Modal, Card, Avatar, Divider } from 'react-native-paper';
+import { Text, Button, Portal, Modal } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
-
-const COLORS = {
-  primary: '#6A5AE0',
-  white: '#FFFFFF',
-  error: '#DC3545',
-  text: '#0D0D0D',
-  textSecondary: '#6C757D',
-  lightPurple: '#E8E5FA',
-  success: '#28A745',
-};
+import { Avatar, IconBadge, StatusPill } from '../ui';
+import { palette, space, radius, font, shadow } from '../../constants/theme';
 
 interface Partner {
   id: number;
@@ -42,12 +34,12 @@ export default function ActiveConnectionModal({
 
   const handleEndRide = () => {
     Alert.alert(
-      'End Ride',
-      'Are you sure you want to end this ride? This will disconnect you from your pooling partner.',
+      'End this ride?',
+      'This cancels your ride agreement and disconnects you from your ride partner.',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep ride', style: 'cancel' },
         {
-          text: 'End Ride',
+          text: 'End ride',
           style: 'destructive',
           onPress: async () => {
             setEndingRide(true);
@@ -67,201 +59,178 @@ export default function ActiveConnectionModal({
       <Modal
         visible={visible}
         dismissable={false}
-        contentContainerStyle={styles.modalContainer}
+        style={styles.modalWrapper}
+        contentContainerStyle={styles.sheet}
       >
-        <Card style={styles.card}>
-          <Card.Content>
-            {/* Success Header */}
-            <View style={styles.header}>
-              <View style={styles.successBadge}>
-                <Ionicons name="checkmark-circle" size={32} color={COLORS.success} />
+        <View style={styles.handle} />
+
+        <View style={styles.header}>
+          <IconBadge icon="checkmark" tone="success" size={48} />
+          <Text style={styles.title}>You&apos;re matched</Text>
+          <Text style={styles.subtitle}>
+            You both agreed to share a taxi. Sort out the pickup point and fare in chat.
+          </Text>
+        </View>
+
+        <View style={styles.partnerRow}>
+          <Avatar name={partner.full_name} size={52} />
+          <View style={styles.partnerText}>
+            <Text style={styles.partnerName} numberOfLines={1}>
+              {partner.full_name}
+            </Text>
+            {partner.phone_number ? (
+              <View style={styles.contactRow}>
+                <Ionicons name="call-outline" size={14} color={palette.textMuted} />
+                <Text style={styles.contactText}>{partner.phone_number}</Text>
               </View>
-              <Text variant="headlineMedium" style={styles.title}>
-                Connected! 🎉
-              </Text>
-              <Text variant="bodyMedium" style={styles.subtitle}>
-                You&apos;re now pooling with
-              </Text>
-            </View>
+            ) : partner.year_of_study ? (
+              <Text style={styles.contactText}>{partner.year_of_study}</Text>
+            ) : null}
+          </View>
+          <StatusPill label="Active" tone="success" />
+        </View>
 
-            {/* Partner Info */}
-            <View style={styles.partnerSection}>
-              <Avatar.Icon
-                size={80}
-                icon="account"
-                style={styles.avatar}
-                color={COLORS.primary}
-              />
-              <Text variant="headlineSmall" style={styles.partnerName}>
-                {partner.full_name}
-              </Text>
-              {partner.phone_number && (
-                <View style={styles.contactRow}>
-                  <Ionicons name="call" size={18} color={COLORS.textSecondary} />
-                  <Text variant="bodyMedium" style={styles.contactText}>
-                    {partner.phone_number}
-                  </Text>
-                </View>
-              )}
-              <Button
-                mode="text"
-                onPress={onViewFullProfile}
-                style={styles.viewProfileButton}
-                icon={() => <Ionicons name="person-circle" size={18} color={COLORS.primary} />}
-              >
-                View Full Profile
-              </Button>
-            </View>
+        <View style={styles.actions}>
+          <Button
+            mode="contained"
+            onPress={onStartChat}
+            style={styles.button}
+            contentStyle={styles.buttonContent}
+            labelStyle={styles.buttonLabel}
+            icon={() => <Ionicons name="chatbubbles-outline" size={18} color={palette.onPrimary} />}
+          >
+            Open chat
+          </Button>
 
-            <Divider style={styles.divider} />
+          <Button
+            mode="outlined"
+            onPress={onViewFullProfile}
+            style={styles.button}
+            contentStyle={styles.buttonContent}
+            labelStyle={styles.buttonLabel}
+          >
+            View ride details
+          </Button>
 
-            {/* Action Buttons */}
-            <View style={styles.actions}>
-              <Button
-                mode="contained"
-                onPress={onStartChat}
-                style={styles.chatButton}
-                contentStyle={styles.buttonContent}
-                labelStyle={styles.buttonLabel}
-                icon={() => <Ionicons name="chatbubbles" size={20} color={COLORS.white} />}
-              >
-                Start Chat
-              </Button>
+          <Button
+            mode="text"
+            onPress={handleEndRide}
+            loading={endingRide}
+            disabled={endingRide}
+            textColor={palette.danger}
+            style={styles.button}
+            labelStyle={styles.buttonLabel}
+          >
+            End ride
+          </Button>
+        </View>
 
-              <Button
-                mode="outlined"
-                onPress={handleEndRide}
-                loading={endingRide}
-                disabled={endingRide}
-                style={styles.endButton}
-                contentStyle={styles.buttonContent}
-                labelStyle={styles.endButtonLabel}
-                icon={() => <Ionicons name="stop-circle" size={20} color={COLORS.error} />}
-              >
-                End Ride
-              </Button>
-            </View>
-
-            {/* Tips */}
-            <View style={styles.tipsSection}>
-              <Text variant="bodySmall" style={styles.tipsTitle}>
-                💡 Quick Tips:
-              </Text>
-              <Text variant="bodySmall" style={styles.tipsText}>
-                • Share your exact pickup location{'\n'}
-                • Communicate arrival times{'\n'}
-                • Split costs fairly
-              </Text>
-            </View>
-          </Card.Content>
-        </Card>
+        <View style={styles.tips}>
+          <Text style={styles.tipsTitle}>Before you head out</Text>
+          <Text style={styles.tipsText}>
+            {'•'} Agree on an exact pickup point{'\n'}
+            {'•'} Confirm the time in chat{'\n'}
+            {'•'} Decide how you&apos;ll split the fare
+          </Text>
+        </View>
       </Modal>
     </Portal>
   );
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+  modalWrapper: {
+    justifyContent: 'flex-end',
   },
-  card: {
-    width: '100%',
-    maxWidth: 400,
-    backgroundColor: COLORS.white,
-    borderRadius: 20,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
+  sheet: {
+    backgroundColor: palette.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.xl,
+    ...shadow.raised,
+  },
+  handle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: palette.border,
+    marginTop: space.xs,
+    marginBottom: space.lg,
   },
   header: {
     alignItems: 'center',
-    marginBottom: 20,
-  },
-  successBadge: {
-    marginBottom: 12,
-    padding: 8,
-    borderRadius: 50,
-    backgroundColor: '#E8F5E9',
   },
   title: {
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 4,
+    marginTop: space.sm,
+    fontSize: 22,
+    fontWeight: font.bold,
+    color: palette.text,
   },
   subtitle: {
-    color: COLORS.textSecondary,
+    marginTop: space.xxs,
+    fontSize: 14,
+    lineHeight: 20,
+    color: palette.textMuted,
+    textAlign: 'center',
   },
-  partnerSection: {
+  partnerRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginTop: space.lg,
+    padding: space.md,
+    borderRadius: radius.lg,
+    backgroundColor: palette.surfaceMuted,
   },
-  avatar: {
-    backgroundColor: COLORS.lightPurple,
-    marginBottom: 12,
+  partnerText: {
+    flex: 1,
+    marginHorizontal: space.sm,
   },
   partnerName: {
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 8,
+    fontSize: 16,
+    fontWeight: font.semibold,
+    color: palette.text,
   },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    gap: space.xxs,
+    marginTop: 2,
   },
   contactText: {
-    color: COLORS.textSecondary,
-  },
-  viewProfileButton: {
-    marginTop: 4,
-  },
-  divider: {
-    marginVertical: 16,
+    fontSize: 13,
+    color: palette.textMuted,
   },
   actions: {
-    gap: 12,
-    marginBottom: 16,
+    marginTop: space.lg,
+    gap: space.xs,
   },
-  chatButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-  },
-  endButton: {
-    borderRadius: 12,
-    borderColor: COLORS.error,
-    borderWidth: 1.5,
+  button: {
+    borderRadius: radius.md,
   },
   buttonContent: {
-    paddingVertical: 8,
+    height: 48,
   },
   buttonLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: font.semibold,
   },
-  endButtonLabel: {
-    color: COLORS.error,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  tipsSection: {
-    backgroundColor: '#F8F9FA',
-    padding: 12,
-    borderRadius: 8,
+  tips: {
+    marginTop: space.md,
+    padding: space.md,
+    borderRadius: radius.md,
+    backgroundColor: palette.primarySoft,
   },
   tipsTitle: {
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 6,
+    fontSize: 14,
+    fontWeight: font.semibold,
+    color: palette.primaryDark,
+    marginBottom: space.xxs,
   },
   tipsText: {
-    color: COLORS.textSecondary,
+    fontSize: 13,
     lineHeight: 20,
+    color: palette.text,
   },
 });

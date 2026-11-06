@@ -1,20 +1,19 @@
 // src/components/pooling/ChatModal.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, FlatList, KeyboardAvoidingView, Platform, Alert } from 'react-native';
-import { Text, Portal, Modal, Card, TextInput, IconButton, Avatar } from 'react-native-paper';
-import { Ionicons } from '@expo/vector-icons';
+import {
+  View,
+  StyleSheet,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+  TextInput,
+} from 'react-native';
+import { Text, Portal, Modal } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Message, getMessages, sendMessage, markMessagesAsRead } from '../../services/chatService';
-
-const COLORS = {
-  primary: '#6A5AE0',
-  white: '#FFFFFF',
-  text: '#0D0D0D',
-  textSecondary: '#6C757D',
-  border: '#E9ECEF',
-  myMessage: '#6A5AE0',
-  theirMessage: '#F1F3F5',
-  lightPurple: '#E8E5FA',
-};
+import { palette, space, radius, font } from '../../constants/theme';
+import { Avatar, EmptyState, IconButton } from '../ui';
 
 interface ChatModalProps {
   visible: boolean;
@@ -41,6 +40,7 @@ export default function ChatModal({
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const insets = useSafeAreaInsets();
 
   // Load messages when modal opens
   const loadMessages = useCallback(async () => {
@@ -127,50 +127,34 @@ export default function ChatModal({
     }
   }, [visible, addIncomingMessage]);
 
+  const canSend = inputText.trim().length > 0 && !sending;
+
   const renderMessage = ({ item }: { item: Message }) => {
     const isMyMessage = item.sender_id === currentUserId;
-    
+
     return (
       <View
         style={[
-          styles.messageContainer,
-          isMyMessage ? styles.myMessageContainer : styles.theirMessageContainer,
+          styles.messageRow,
+          isMyMessage ? styles.myMessageRow : styles.theirMessageRow,
         ]}
       >
-        {!isMyMessage && (
-          <Avatar.Icon
-            size={32}
-            icon="account"
-            style={styles.avatar}
-            color={COLORS.primary}
-          />
-        )}
         <View
           style={[
             styles.messageBubble,
             isMyMessage ? styles.myMessageBubble : styles.theirMessageBubble,
           ]}
         >
-          <Text
-            style={[
-              styles.messageText,
-              isMyMessage ? styles.myMessageText : styles.theirMessageText,
-            ]}
-          >
+          <Text style={[styles.messageText, isMyMessage && styles.myMessageText]}>
             {item.content}
           </Text>
-          <Text
-            style={[
-              styles.timeText,
-              isMyMessage ? styles.myTimeText : styles.theirTimeText,
-            ]}
-          >
-            {new Date(item.created_at).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </Text>
         </View>
+        <Text style={[styles.timeText, isMyMessage && styles.myTimeText]}>
+          {new Date(item.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </Text>
       </View>
     );
   };
@@ -182,81 +166,73 @@ export default function ChatModal({
         onDismiss={onDismiss}
         contentContainerStyle={styles.modalContainer}
       >
-        <Card style={styles.card}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.sheet}
+        >
           {/* Header */}
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <Avatar.Icon
-                size={40}
-                icon="account"
-                style={styles.headerAvatar}
-                color={COLORS.primary}
-              />
-              <View>
-                <Text variant="titleMedium" style={styles.headerTitle}>
+          <View style={[styles.header, { paddingTop: insets.top + space.sm }]}>
+            <IconButton icon="chevron-back" label="Close chat" onPress={onDismiss} />
+            <View style={styles.headerCenter}>
+              <Avatar name={partnerName} size={40} />
+              <View style={styles.headerInfo}>
+                <Text style={styles.headerTitle} numberOfLines={1}>
                   {partnerName}
                 </Text>
-                <Text variant="bodySmall" style={styles.headerSubtitle}>
-                  Online
+                <Text style={styles.headerSubtitle} numberOfLines={1}>
+                  Ride chat
                 </Text>
               </View>
             </View>
-            <IconButton icon="close" onPress={onDismiss} />
           </View>
 
           {/* Messages */}
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.chatContainer}
-            keyboardVerticalOffset={100}
-          >
-            <FlatList
-              ref={flatListRef}
-              data={messages}
-              keyExtractor={(item) => item.id.toString()}
-              renderItem={renderMessage}
-              contentContainerStyle={styles.messagesList}
-              showsVerticalScrollIndicator={false}
-              onContentSizeChange={() =>
-                flatListRef.current?.scrollToEnd({ animated: true })
-              }
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <Ionicons name="chatbubbles-outline" size={48} color={COLORS.textSecondary} />
-                  <Text style={styles.emptyText}>No messages yet</Text>
-                  <Text style={styles.emptySubtext}>Start the conversation!</Text>
-                </View>
-              }
-            />
-
-            {/* Input */}
-            <View style={styles.inputContainer}>
-              <TextInput
-                mode="outlined"
-                placeholder="Type a message..."
-                value={inputText}
-                onChangeText={setInputText}
-                style={styles.input}
-                multiline
-                maxLength={500}
-                disabled={sending}
-                right={
-                  <TextInput.Icon
-                    icon={() => (
-                      <Ionicons
-                        name="send"
-                        size={24}
-                        color={inputText.trim() ? COLORS.primary : COLORS.textSecondary}
-                      />
-                    )}
-                    onPress={handleSendMessage}
-                    disabled={!inputText.trim() || sending}
-                  />
-                }
+          <FlatList
+            ref={flatListRef}
+            style={styles.list}
+            data={messages}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={renderMessage}
+            contentContainerStyle={styles.messagesList}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            onContentSizeChange={() =>
+              flatListRef.current?.scrollToEnd({ animated: true })
+            }
+            ListEmptyComponent={
+              <EmptyState
+                icon="chatbubbles-outline"
+                title="No messages yet"
+                body={`Say hi to ${partnerName} and sort out where to meet.`}
+                style={styles.list}
               />
-            </View>
-          </KeyboardAvoidingView>
-        </Card>
+            }
+          />
+
+          {/* Composer */}
+          <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, space.sm) }]}>
+            <TextInput
+              placeholder="Message"
+              placeholderTextColor={palette.textFaint}
+              value={inputText}
+              onChangeText={setInputText}
+              style={styles.input}
+              multiline
+              maxLength={500}
+              editable={!sending}
+              accessibilityLabel="Message"
+            />
+            <IconButton
+              icon="send"
+              label="Send message"
+              tone={canSend ? 'primary' : 'neutral'}
+              size={44}
+              onPress={canSend ? handleSendMessage : undefined}
+              style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
+            />
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </Portal>
   );
@@ -268,114 +244,117 @@ const styles = StyleSheet.create({
     margin: 0,
     padding: 0,
   },
-  card: {
+  sheet: {
     flex: 1,
-    backgroundColor: COLORS.white,
-    borderRadius: 0,
+    backgroundColor: palette.background,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    paddingHorizontal: space.md,
+    paddingBottom: space.sm,
+    backgroundColor: palette.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
   },
-  headerLeft: {
+  headerCenter: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    marginLeft: space.sm,
   },
-  headerAvatar: {
-    backgroundColor: COLORS.lightPurple,
+  headerInfo: {
+    flex: 1,
+    marginLeft: space.sm,
   },
   headerTitle: {
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: font.semibold,
+    color: palette.text,
   },
   headerSubtitle: {
-    color: COLORS.textSecondary,
+    fontSize: 12,
+    color: palette.textMuted,
+    marginTop: 2,
   },
-  chatContainer: {
+  list: {
     flex: 1,
   },
   messagesList: {
-    padding: 16,
+    paddingHorizontal: space.md,
+    paddingTop: space.md,
+    paddingBottom: space.xs,
     flexGrow: 1,
   },
-  messageContainer: {
-    flexDirection: 'row',
-    marginBottom: 12,
+  messageRow: {
+    marginBottom: space.sm,
+    maxWidth: '80%',
+  },
+  myMessageRow: {
+    alignSelf: 'flex-end',
     alignItems: 'flex-end',
   },
-  myMessageContainer: {
-    justifyContent: 'flex-end',
-  },
-  theirMessageContainer: {
-    justifyContent: 'flex-start',
-  },
-  avatar: {
-    backgroundColor: COLORS.lightPurple,
-    marginRight: 8,
+  theirMessageRow: {
+    alignSelf: 'flex-start',
+    alignItems: 'flex-start',
   },
   messageBubble: {
-    maxWidth: '75%',
-    padding: 12,
-    borderRadius: 16,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs + 2,
+    borderRadius: radius.lg,
   },
   myMessageBubble: {
-    backgroundColor: COLORS.myMessage,
-    borderBottomRightRadius: 4,
+    backgroundColor: palette.primary,
+    borderBottomRightRadius: radius.sm / 2,
   },
   theirMessageBubble: {
-    backgroundColor: COLORS.theirMessage,
-    borderBottomLeftRadius: 4,
+    backgroundColor: palette.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.border,
+    borderBottomLeftRadius: radius.sm / 2,
   },
   messageText: {
     fontSize: 15,
-    lineHeight: 20,
+    lineHeight: 21,
+    color: palette.text,
   },
   myMessageText: {
-    color: COLORS.white,
-  },
-  theirMessageText: {
-    color: COLORS.text,
+    color: palette.onPrimary,
   },
   timeText: {
     fontSize: 11,
-    marginTop: 4,
+    marginTop: space.xxs,
+    marginHorizontal: space.xxs,
+    color: palette.textFaint,
   },
   myTimeText: {
-    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'right',
   },
-  theirTimeText: {
-    color: COLORS.textSecondary,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginTop: 16,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-  },
-  inputContainer: {
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    backgroundColor: COLORS.white,
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: space.md,
+    paddingTop: space.xs,
+    backgroundColor: palette.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.border,
   },
   input: {
-    backgroundColor: COLORS.white,
-    maxHeight: 100,
+    flex: 1,
+    minHeight: 44,
+    maxHeight: 120,
+    paddingHorizontal: space.md,
+    paddingTop: space.sm,
+    paddingBottom: space.sm,
+    backgroundColor: palette.surfaceMuted,
+    borderRadius: radius.xl,
+    fontSize: 15,
+    color: palette.text,
+  },
+  sendButton: {
+    marginLeft: space.xs,
+  },
+  sendButtonDisabled: {
+    opacity: 0.6,
   },
 });

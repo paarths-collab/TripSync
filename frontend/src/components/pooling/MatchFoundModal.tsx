@@ -1,14 +1,11 @@
 // src/components/pooling/MatchFoundModal.tsx
 import React, { useCallback } from 'react';
 import { View, StyleSheet, FlatList } from 'react-native';
-import { Text, Button, Portal, Modal, Card } from 'react-native-paper';
+import { Text, Button, Portal, Modal } from 'react-native-paper';
 import { MatchedUser } from '../../services/poolingService';
 import MatchedUserCard from './MatchedUserCard';
-
-const COLORS = {
-  primary: '#6A5AE0',
-  white: '#FFFFFF',
-};
+import { EmptyState, IconButton, StatusPill } from '../ui';
+import { palette, space, radius, font, shadow } from '../../constants/theme';
 
 interface MatchFoundModalProps {
   visible: boolean;
@@ -19,18 +16,18 @@ interface MatchFoundModalProps {
   onReject: (connectionId: number) => Promise<void>;
 }
 
-export default function MatchFoundModal({ 
-  visible, 
-  matches, 
+export default function MatchFoundModal({
+  visible,
+  matches,
   onNewSearch,
   onSendRequest,
   onApprove,
-  onReject
+  onReject,
 }: MatchFoundModalProps) {
   const hasMatches = matches.length > 0;
   const title = hasMatches
-    ? `Found ${matches.length} ${matches.length === 1 ? 'Match' : 'Matches'}`
-    : 'No Matches Found';
+    ? `${matches.length} ${matches.length === 1 ? 'person' : 'people'} heading your way`
+    : 'No one found yet';
 
   const handleClose = useCallback(() => {
     console.log('MatchFoundModal - Close button pressed');
@@ -39,96 +36,139 @@ export default function MatchFoundModal({
 
   return (
     <Portal>
-      <Modal 
-        visible={visible} 
+      <Modal
+        visible={visible}
         onDismiss={handleClose}
         dismissable={true}
-        contentContainerStyle={styles.modalContainer}
+        style={styles.modalWrapper}
+        contentContainerStyle={styles.sheet}
       >
-        <Card style={styles.card}>
-          <Card.Content>
-            <View style={styles.header}>
-              <Text variant="headlineSmall" style={styles.title}>{title}</Text>
-              <Button 
-                icon="close" 
-                onPress={handleClose}
-                style={styles.closeButton}
-              >
-                
-              </Button>
-            </View>
+        <View style={styles.handle} />
+
+        <View style={styles.header}>
+          <View style={styles.headerText}>
+            <StatusPill
+              label={hasMatches ? 'Matched' : 'No matches'}
+              tone={hasMatches ? 'success' : 'neutral'}
+              icon={hasMatches ? 'people' : 'search'}
+            />
+            <Text style={styles.title}>{title}</Text>
             {hasMatches ? (
-              <FlatList
-                data={matches}
-                keyExtractor={(item) => item.id.toString()}
-                renderItem={({ item }) => (
-                  <MatchedUserCard 
-                    user={item}
-                    onSendRequest={onSendRequest}
-                    onApprove={onApprove}
-                    onReject={onReject}
-                  />
-                )}
-                showsVerticalScrollIndicator={false}
-              />
-            ) : (
-              <Text style={styles.noMatchText}>
-                No active poolers were found nearby. Try searching again in a few moments.
+              <Text style={styles.subtitle}>
+                Send a request to agree on sharing a taxi. You book and pay for it together.
               </Text>
+            ) : null}
+          </View>
+          <IconButton icon="close" label="Close and start over" onPress={handleClose} size={36} />
+        </View>
+
+        {hasMatches ? (
+          <FlatList
+            data={matches}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={({ item }) => (
+              <MatchedUserCard
+                user={item}
+                onSendRequest={onSendRequest}
+                onApprove={onApprove}
+                onReject={onReject}
+              />
             )}
-          </Card.Content>
-          <Card.Actions>
-            <Button 
-              mode="contained" 
-              onPress={onNewSearch} 
-              style={styles.button}
-            >
-              Start a New Search
-            </Button>
-          </Card.Actions>
-        </Card>
+            contentContainerStyle={styles.listContent}
+            style={styles.list}
+            showsVerticalScrollIndicator={false}
+          />
+        ) : (
+          <EmptyState
+            icon="people-outline"
+            title="No students on this route right now"
+            body="Try searching again in a few minutes."
+            style={styles.empty}
+          />
+        )}
+
+        <View style={styles.footer}>
+          <Button
+            mode="outlined"
+            onPress={onNewSearch}
+            style={styles.button}
+            contentStyle={styles.buttonContent}
+            labelStyle={styles.buttonLabel}
+          >
+            Start a new search
+          </Button>
+        </View>
       </Modal>
     </Portal>
   );
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+  modalWrapper: {
+    justifyContent: 'flex-end',
   },
-  card: {
-    width: '100%',
-    maxHeight: '80%',
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
+  sheet: {
+    maxHeight: '85%',
+    backgroundColor: palette.background,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingBottom: space.xl,
+    ...shadow.raised,
+  },
+  handle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: palette.border,
+    marginTop: space.xs,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+    alignItems: 'flex-start',
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    paddingBottom: space.sm,
   },
-  closeButton: {
-    margin: 0,
-    marginRight: -8,
+  headerText: {
+    flex: 1,
+    marginRight: space.sm,
   },
   title: {
-    flex: 1,
-    fontWeight: 'bold',
-    color: COLORS.primary,
+    marginTop: space.xs,
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: font.bold,
+    color: palette.text,
   },
-  noMatchText: {
-    textAlign: 'center',
-    marginBottom: 20,
-    marginTop: 10,
+  subtitle: {
+    marginTop: space.xxs,
+    fontSize: 14,
+    lineHeight: 20,
+    color: palette.textMuted,
+  },
+  list: {
+    flexGrow: 0,
+  },
+  listContent: {
+    paddingHorizontal: space.lg,
+    paddingTop: space.xs,
+  },
+  empty: {
+    paddingVertical: space.xl,
+  },
+  footer: {
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
   },
   button: {
-    flex: 1,
-    backgroundColor: COLORS.primary,
-    borderRadius: 8,
+    borderRadius: radius.md,
+  },
+  buttonContent: {
+    height: 48,
+  },
+  buttonLabel: {
+    fontSize: 15,
+    fontWeight: font.semibold,
   },
 });

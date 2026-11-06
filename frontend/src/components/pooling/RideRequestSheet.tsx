@@ -4,6 +4,7 @@ import { View, StyleSheet } from 'react-native';
 import { Text, TextInput, Button, Portal, Modal } from 'react-native-paper';
 import { AutocompleteSuggestion } from '../../services/locationService';
 import AutocompleteInput from './AutocompleteInput';
+import { palette, space, radius, font, shadow } from '../../constants/theme';
 
 interface RideRequestSheetProps {
   visible: boolean;
@@ -24,62 +25,78 @@ export default function RideRequestSheet({
 }: RideRequestSheetProps) {
   return (
     <Portal>
-      <Modal visible={visible} onDismiss={onClose} contentContainerStyle={styles.modalContainer}>
-        <View style={styles.sheetContent}>
-          <Text variant="headlineSmall" style={styles.title}>Plan your ride</Text>
-          
-          <TextInput
-            mode="outlined"
-            label="From"
-            value={startLocation}
-            disabled
-            style={styles.input}
-            left={<TextInput.Icon icon="map-marker-circle" />}
-          />
-          
-          <AutocompleteInput
-                      label="To? (Enter Destination)"
-                      onPlaceSelected={onPlaceSelected} onSuggestionsChange={function (suggestions: AutocompleteSuggestion[]): void {
-                          throw new Error('Function not implemented.');
-                      } }          />
-          
-          <Button
-            mode="contained"
-            onPress={onSearch}
-            disabled={isSearchDisabled}
-            style={styles.button}
-            contentStyle={{ paddingVertical: 8 }}
-            labelStyle={{ fontSize: 18 }}
-          >
-            Find Matches
-          </Button>
-        </View>
+      <Modal
+        visible={visible}
+        onDismiss={onClose}
+        style={styles.modalWrapper}
+        contentContainerStyle={styles.sheet}
+      >
+        <View style={styles.handle} />
+        <Text style={styles.title}>Plan your ride</Text>
+
+        <TextInput
+          mode="outlined"
+          label="From"
+          value={startLocation}
+          disabled
+          outlineColor={palette.border}
+          outlineStyle={{ borderRadius: radius.md }}
+          style={styles.input}
+          left={<TextInput.Icon icon="map-marker-circle" color={palette.success} />}
+        />
+
+        <AutocompleteInput label="To" onPlaceSelected={onPlaceSelected} />
+
+        <Button
+          mode="contained"
+          onPress={onSearch}
+          disabled={isSearchDisabled}
+          style={styles.button}
+          contentStyle={styles.buttonContent}
+          labelStyle={styles.buttonLabel}
+        >
+          Find a ride partner
+        </Button>
       </Modal>
     </Portal>
   );
 }
 
 const styles = StyleSheet.create({
-  modalContainer: {
+  modalWrapper: {
     justifyContent: 'flex-end',
-    margin: 0,
-    flex: 1,
   },
-  sheetContent: {
-    backgroundColor: '#222', // Dark surface color for a modern look
-    padding: 22,
-    borderTopRightRadius: 20,
-    borderTopLeftRadius: 20,
-    borderColor: 'rgba(0, 0, 0, 0.1)',
+  sheet: {
+    backgroundColor: palette.surface,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.xl,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    ...shadow.raised,
+  },
+  handle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: palette.border,
+    marginTop: space.xs,
+    marginBottom: space.md,
   },
   title: {
-    marginBottom: 20,
-    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: font.bold,
+    color: palette.text,
+    marginBottom: space.md,
   },
   input: {
-    marginBottom: 15,
+    marginBottom: space.sm,
+    backgroundColor: palette.surface,
   },
   button: {
-    marginTop: 20,
+    marginTop: space.lg,
+    borderRadius: radius.md,
   },
+  buttonContent: { height: 50 },
+  buttonLabel: { fontSize: 16, fontWeight: font.semibold },
 });

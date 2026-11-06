@@ -1,12 +1,16 @@
 // src/components/pooling/MapInterface.tsx
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
-import { IconButton, Card, Text, Surface } from 'react-native-paper';
+import { View, StyleSheet } from 'react-native';
+import { Text } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { Card, IconButton } from '../ui';
+import { palette, space, font, shadow } from '../../constants/theme';
 
 interface MapInterfaceProps {
   pickupLocationName: string;
-  destinationName?: string; // --- THIS NEW PROP IS ADDED ---
+  destinationName?: string;
   onWhereToPress: () => void;
   onRecenterPress: () => void;
   onTogglePitch: () => void;
@@ -15,47 +19,73 @@ interface MapInterfaceProps {
 
 export default function MapInterface({
   pickupLocationName,
-  destinationName, // Destructure the new prop
+  destinationName,
   onWhereToPress,
   onRecenterPress,
   onTogglePitch,
   mapPitch,
 }: MapInterfaceProps) {
+  const insets = useSafeAreaInsets();
+
   return (
     <>
+      {/* Centre pin: the map centre is the pickup point */}
       <View style={styles.pinContainer} pointerEvents="none">
-        <Ionicons name="location" size={40} color="#e74c3c" style={styles.pinShadow} />
+        <Ionicons name="location" size={40} color={palette.primary} style={styles.pinShadow} />
       </View>
 
-      <View style={styles.rightButtonsContainer} pointerEvents="auto">
-        <Surface style={styles.buttonSurface}>
-          <IconButton icon={mapPitch === 60 ? 'map-outline' : 'cube-outline'} onPress={onTogglePitch} size={24} iconColor="#333" />
-        </Surface>
-        <Surface style={styles.buttonSurface}>
-          <IconButton icon="crosshairs-gps" onPress={onRecenterPress} size={24} iconColor="#333" />
-        </Surface>
-      </View>
-
-      <Card style={styles.topCard} pointerEvents="auto">
-        <TouchableOpacity onPress={onWhereToPress}>
+      <View
+        style={[styles.topArea, { top: insets.top + space.xs }]}
+        pointerEvents="box-none"
+      >
+        <Card
+          onPress={onWhereToPress}
+          padded={false}
+          style={styles.topCard}
+        >
           <View style={styles.locationRow}>
-            <Ionicons name="location-sharp" size={20} color="#3498db" />
-            <Text style={styles.locationText} numberOfLines={1}>{pickupLocationName}</Text>
+            <View style={[styles.dot, styles.pickupDot]} />
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>Pickup</Text>
+              <Text style={styles.locationText} numberOfLines={1}>
+                {pickupLocationName}
+              </Text>
+            </View>
           </View>
           <View style={styles.divider} />
           <View style={styles.locationRow}>
-            <Ionicons name="search" size={20} color="#e74c3c" />
-            {/* --- THIS LOGIC IS UPDATED --- */}
-            {/* If a destination name exists, show it. Otherwise, show the placeholder. */}
-            {destinationName ? (
-              <Text style={styles.locationText} numberOfLines={1}>{destinationName}</Text>
-            ) : (
-              <Text style={styles.placeholderText}>Where to?</Text>
-            )}
-            {/* ----------------------------- */}
+            <View style={[styles.dot, styles.destinationDot]} />
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>Destination</Text>
+              {destinationName ? (
+                <Text style={styles.locationText} numberOfLines={1}>
+                  {destinationName}
+                </Text>
+              ) : (
+                <Text style={styles.placeholderText}>Where to?</Text>
+              )}
+            </View>
+            <Ionicons name="search" size={18} color={palette.textMuted} />
           </View>
-        </TouchableOpacity>
-      </Card>
+        </Card>
+
+        <View style={styles.mapButtons} pointerEvents="box-none">
+          <IconButton
+            icon={mapPitch === 60 ? 'map-outline' : 'cube-outline'}
+            label={mapPitch === 60 ? 'Switch to flat map' : 'Switch to 3D map'}
+            onPress={onTogglePitch}
+            size={44}
+            style={styles.mapButton}
+          />
+          <IconButton
+            icon="locate"
+            label="Recenter on my location"
+            onPress={onRecenterPress}
+            size={44}
+            style={styles.mapButton}
+          />
+        </View>
+      </View>
     </>
   );
 }
@@ -68,44 +98,67 @@ const styles = StyleSheet.create({
     transform: [{ translateX: -20 }, { translateY: -40 }],
   },
   pinShadow: {
-    textShadowColor: 'rgba(0, 0, 0, 0.4)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    textShadowColor: 'rgba(22, 20, 43, 0.35)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
-  rightButtonsContainer: {
+  topArea: {
     position: 'absolute',
-    top: 180,
-    right: 15,
-    alignItems: 'center',
-  },
-  buttonSurface: {
-    backgroundColor: '#fff',
-    borderRadius: 50,
-    marginBottom: 10,
-    elevation: 4,
+    left: space.md,
+    right: space.md,
   },
   topCard: {
-    position: 'absolute',
-    top: 50,
-    left: 15,
-    right: 15,
-    backgroundColor: '#fff',
-    elevation: 8,
-    padding: 8,
+    paddingVertical: space.xxs,
   },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  pickupDot: {
+    backgroundColor: palette.success,
+  },
+  destinationDot: {
+    backgroundColor: palette.primary,
+  },
+  rowText: {
+    flex: 1,
+    marginLeft: space.sm,
+    marginRight: space.xs,
+  },
+  rowLabel: {
+    fontSize: 12,
+    color: palette.textMuted,
+    marginBottom: 2,
   },
   locationText: {
-    marginLeft: 12, color: '#333', fontWeight: '500', flex: 1,
+    fontSize: 15,
+    color: palette.text,
+    fontWeight: font.medium,
   },
   placeholderText: {
-    marginLeft: 12, color: '#888', flex: 1,
+    fontSize: 15,
+    color: palette.textFaint,
+    fontWeight: font.medium,
   },
   divider: {
-    height: 1, backgroundColor: '#eee', marginVertical: 4, marginLeft: 40,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: palette.border,
+    marginLeft: space.md + 10 + space.sm,
+    marginRight: space.md,
+  },
+  mapButtons: {
+    alignItems: 'flex-end',
+    marginTop: space.sm,
+    gap: space.xs,
+  },
+  mapButton: {
+    ...shadow.card,
   },
 });

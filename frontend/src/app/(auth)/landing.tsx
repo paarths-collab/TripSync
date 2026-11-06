@@ -2,223 +2,197 @@
 
 import React from 'react';
 import { View, StyleSheet, ScrollView, StatusBar } from 'react-native';
-import { Text, Button, useTheme } from 'react-native-paper';
+import { Text, Button } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '../../components/ScreenWrapper';
+import { Card, IconBadge } from '../../components/ui';
+import { palette, space, radius, font, shadow } from '../../constants/theme';
+
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
+
+const FEATURES: { icon: IconName; title: string; description: string }[] = [
+  {
+    icon: 'time-outline',
+    title: 'Match by departure time',
+    description: 'Find students from your college heading the same way around the same time.',
+  },
+  {
+    icon: 'people-outline',
+    title: 'Agree a shared ride together',
+    description: 'Settle on a taxi plan as a group, then book and split it yourselves.',
+  },
+  {
+    icon: 'chatbubbles-outline',
+    title: 'Chat while your plan is active',
+    description: 'Coordinate pickup details with your group in one place.',
+  },
+  {
+    icon: 'storefront-outline',
+    title: 'Campus services board',
+    description: 'Offer or find small services within your campus community.',
+  },
+];
 
 export default function LandingScreen() {
   const router = useRouter();
-  const theme = useTheme();
 
   return (
-    <ScreenWrapper style={styles.container}>
+    <ScreenWrapper>
       <StatusBar barStyle="dark-content" />
-      <ScrollView 
+      <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Logo/Title Section */}
-        <View style={styles.header}>
-          <View style={[styles.logoContainer, { backgroundColor: theme.colors.primaryContainer }]}>
-            <Ionicons name="car" size={64} color={theme.colors.primary} />
+        {/* Hero */}
+        <View style={styles.hero}>
+          <View style={styles.logoBadge}>
+            <Ionicons name="car-sport" size={40} color={palette.onPrimary} />
           </View>
-          <Text variant="displayMedium" style={[styles.title, { color: theme.colors.primary }]}>
+          <Text style={styles.title} accessibilityRole="header">
             TripSync
           </Text>
-          <Text variant="titleMedium" style={[styles.subtitle, { color: theme.colors.onSurfaceVariant }]}>
-            Your Smart Ride Sharing Companion
+          <Text style={styles.tagline}>
+            Plan shared taxi rides with students from your college.
           </Text>
         </View>
 
-        {/* Features Section */}
-        <View style={styles.featuresContainer}>
-          <FeatureItem
-            icon="people"
-            title="Pool Rides"
-            description="Share rides with fellow students and save money"
-            theme={theme}
-          />
-          <FeatureItem
-            icon="briefcase"
-            title="Service Marketplace"
-            description="Offer or find services within your campus community"
-            theme={theme}
-          />
-          <FeatureItem
-            icon="map"
-            title="Real-time Tracking"
-            description="Track your rides and matches in real-time"
-            theme={theme}
-          />
-          <FeatureItem
-            icon="shield-checkmark"
-            title="Safe & Verified"
-            description="All users are verified students from your college"
-            theme={theme}
-          />
-        </View>
+        {/* Features */}
+        <Card style={styles.featuresCard}>
+          {FEATURES.map((f, i) => (
+            <View
+              key={f.title}
+              style={[styles.featureRow, i < FEATURES.length - 1 && styles.featureDivider]}
+            >
+              <IconBadge icon={f.icon} size={40} />
+              <View style={styles.featureText}>
+                <Text style={styles.featureTitle}>{f.title}</Text>
+                <Text style={styles.featureDescription}>{f.description}</Text>
+              </View>
+            </View>
+          ))}
+        </Card>
 
-        {/* Description */}
-        <View style={styles.descriptionContainer}>
-          <Text variant="bodyLarge" style={[styles.description, { color: theme.colors.onSurfaceVariant }]}>
-            Connect with students from your college to share rides, offer services, and build a stronger campus community.
-          </Text>
-        </View>
+        <View style={styles.spacer} />
 
-        {/* Action Buttons */}
-        <View style={styles.buttonContainer}>
+        {/* Actions */}
+        <View style={styles.actions}>
           <Button
             mode="contained"
-            onPress={() => router.push('/(auth)/login')}
-            style={[styles.primaryButton, { backgroundColor: theme.colors.primary }]}
+            onPress={() => router.push('/(auth)/register')}
+            style={styles.primaryButton}
             contentStyle={styles.buttonContent}
             labelStyle={styles.buttonLabel}
-            icon={({ size, color }) => <Ionicons name="log-in" size={size} color={color} />}
           >
-            Login
+            Create account
           </Button>
-          
           <Button
-            mode="outlined"
-            onPress={() => router.push('/(auth)/register')}
-            style={[styles.secondaryButton, { borderColor: theme.colors.primary }]}
+            mode="text"
+            onPress={() => router.push('/(auth)/login')}
+            style={styles.secondaryButton}
             contentStyle={styles.buttonContent}
-            labelStyle={[styles.buttonLabel, { color: theme.colors.primary }]}
-            icon={({ size, color }) => <Ionicons name="person-add" size={size} color={color} />}
+            labelStyle={styles.buttonLabel}
           >
-            Sign Up
+            I already have an account
           </Button>
+          <Text style={styles.footnote}>
+            TripSync records ride agreements between students. You book and pay for the taxi yourselves.
+          </Text>
         </View>
       </ScrollView>
     </ScreenWrapper>
   );
 }
 
-function FeatureItem({ icon, title, description, theme }: { 
-  icon: string; 
-  title: string; 
-  description: string; 
-  theme: any;
-}) {
-  return (
-    <View style={styles.featureItem}>
-      <View style={[styles.featureIconContainer, { backgroundColor: theme.colors.primaryContainer }]}>
-        <Ionicons name={icon as any} size={28} color={theme.colors.primary} />
-      </View>
-      <View style={styles.featureTextContainer}>
-        <Text variant="titleSmall" style={[styles.featureTitle, { color: theme.colors.onSurface }]}>
-          {title}
-        </Text>
-        <Text variant="bodySmall" style={[styles.featureDescription, { color: theme.colors.onSurfaceVariant }]}>
-          {description}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
   scrollContent: {
     flexGrow: 1,
-    padding: 24,
+    paddingHorizontal: space.xl,
+    paddingTop: space.xxl,
+    paddingBottom: space.xl,
   },
-  header: {
+  hero: {
     alignItems: 'center',
-    marginTop: 40,
-    marginBottom: 40,
+    marginBottom: space.xxl,
   },
-  logoContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+  logoBadge: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xl,
+    backgroundColor: palette.primary,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    marginBottom: space.lg,
+    ...shadow.raised,
   },
   title: {
-    fontWeight: 'bold',
-    marginBottom: 8,
+    fontSize: 34,
+    lineHeight: 40,
+    fontWeight: font.bold,
+    color: palette.text,
+    letterSpacing: -0.5,
     textAlign: 'center',
   },
-  subtitle: {
+  tagline: {
+    marginTop: space.xs,
+    fontSize: 16,
+    lineHeight: 22,
+    color: palette.textMuted,
     textAlign: 'center',
-    marginTop: 8,
+    maxWidth: 300,
   },
-  featuresContainer: {
-    marginBottom: 32,
+  featuresCard: {
+    paddingVertical: space.xs,
   },
-  featureItem: {
+  featureRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 24,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#F8F9FA',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-  },
-  featureIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
+    paddingVertical: space.sm,
   },
-  featureTextContainer: {
+  featureDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
+  },
+  featureText: {
     flex: 1,
+    marginLeft: space.md,
   },
   featureTitle: {
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: font.semibold,
+    color: palette.text,
   },
   featureDescription: {
-    lineHeight: 20,
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 18,
+    color: palette.textMuted,
   },
-  descriptionContainer: {
-    marginBottom: 32,
-    paddingHorizontal: 8,
+  spacer: {
+    flexGrow: 1,
+    minHeight: space.xl,
   },
-  description: {
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  buttonContainer: {
-    gap: 12,
-    marginBottom: 24,
+  actions: {
+    gap: space.xs,
   },
   primaryButton: {
-    borderRadius: 12,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    borderRadius: radius.md,
   },
   secondaryButton: {
-    borderRadius: 12,
-    borderWidth: 2,
+    borderRadius: radius.md,
   },
   buttonContent: {
-    paddingVertical: 8,
+    height: 52,
   },
   buttonLabel: {
     fontSize: 16,
-    fontWeight: '600',
-    paddingHorizontal: 8,
+    fontWeight: font.semibold,
+  },
+  footnote: {
+    marginTop: space.xs,
+    fontSize: 12,
+    lineHeight: 17,
+    color: palette.textFaint,
+    textAlign: 'center',
   },
 });
-

@@ -1,23 +1,21 @@
 // src/app/(main)/chat.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, FlatList, KeyboardAvoidingView, Platform, TouchableOpacity, SafeAreaView } from 'react-native';
-import { Text, TextInput, Avatar } from 'react-native-paper';
-import { Ionicons } from '@expo/vector-icons';
+import {
+  View,
+  StyleSheet,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  TextInput,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Text } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Message, getMessages, sendMessage, markMessagesAsRead, findOrCreateConversation } from '../../services/chatService';
 import { useAuth } from '../../context/AuthContext';
-
-const COLORS = {
-  primary: '#6A5AE0',
-  white: '#FFFFFF',
-  text: '#0D0D0D',
-  textSecondary: '#6C757D',
-  border: '#E9ECEF',
-  myMessage: '#6A5AE0',
-  theirMessage: '#F1F3F5',
-  lightPurple: '#E8E5FA',
-  background: '#F8F9FA',
-};
+import { palette, space, radius, font } from '../../constants/theme';
+import { Avatar, EmptyState, IconButton, LoadingState } from '../../components/ui';
 
 export default function ChatScreen() {
   const router = useRouter();
@@ -34,7 +32,7 @@ export default function ChatScreen() {
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const flatListRef = useRef<FlatList>(null);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const partnerId = parseInt(params.partnerId || '0');
   const partnerName = params.partnerName || 'Partner';
@@ -152,25 +150,19 @@ export default function ChatScreen() {
     "I'm here"
   ];
 
+  const canSend = inputText.trim().length > 0 && !sending;
+
   const renderMessage = ({ item }: { item: Message }) => {
     if (!user) return null;
     const isMyMessage = item.sender_id === user.id;
-    
+
     return (
       <View
         style={[
-          styles.messageContainer,
-          isMyMessage ? styles.myMessageContainer : styles.theirMessageContainer,
+          styles.messageRow,
+          isMyMessage ? styles.myMessageRow : styles.theirMessageRow,
         ]}
       >
-        {!isMyMessage && (
-          <Avatar.Icon
-            size={32}
-            icon="account"
-            style={styles.avatar}
-            color={COLORS.primary}
-          />
-        )}
         <View
           style={[
             styles.messageBubble,
@@ -180,78 +172,73 @@ export default function ChatScreen() {
           <Text style={[styles.messageText, isMyMessage && styles.myMessageText]}>
             {item.content}
           </Text>
-          <Text style={[styles.timeText, isMyMessage && styles.myTimeText]}>
-            {new Date(item.created_at).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </Text>
         </View>
+        <Text style={[styles.timeText, isMyMessage && styles.myTimeText]}>
+          {new Date(item.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </Text>
       </View>
     );
   };
 
+  const header = (
+    <View style={styles.header}>
+      <IconButton
+        icon="chevron-back"
+        label="Back to chats"
+        onPress={() => router.push('/(main)/chats')}
+      />
+      <View style={styles.headerCenter}>
+        <Avatar name={partnerName} size={40} />
+        <View style={styles.headerInfo}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {partnerName}
+          </Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>
+            Ride chat
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading conversation...</Text>
-        </View>
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        {header}
+        <LoadingState label="Loading conversation…" style={styles.fill} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.push('/(main)/chats')} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.text} />
-        </TouchableOpacity>
-        
-        <View style={styles.headerCenter}>
-          <Avatar.Icon
-            size={40}
-            icon="account"
-            style={styles.headerAvatar}
-            color={COLORS.primary}
-          />
-          <View style={styles.headerInfo}>
-            <Text style={styles.headerTitle}>{partnerName}</Text>
-            <Text style={styles.headerSubtitle}>Active now</Text>
-          </View>
-        </View>
+    <KeyboardAvoidingView
+      style={styles.fill}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+        {header}
 
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerActionButton}>
-            <Ionicons name="videocam" size={24} color={COLORS.primary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerActionButton}>
-            <Ionicons name="call" size={22} color={COLORS.primary} />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Messages */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.chatContainer}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
         <FlatList
           ref={flatListRef}
+          style={styles.fill}
           data={messages}
           keyExtractor={(item) => item.id.toString()}
           renderItem={renderMessage}
           contentContainerStyle={styles.messagesList}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubbles-outline" size={64} color={COLORS.textSecondary} />
-              <Text style={styles.emptyText}>No messages yet</Text>
-              <Text style={styles.emptySubtext}>Start the conversation!</Text>
-            </View>
+            <EmptyState
+              icon="chatbubbles-outline"
+              title="No messages yet"
+              body={`Say hi to ${partnerName} and sort out where to meet.`}
+              style={styles.fill}
+            />
           }
         />
 
@@ -262,247 +249,191 @@ export default function ChatScreen() {
               data={quickMessages}
               horizontal
               showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.quickMessagesList}
               keyExtractor={(item, index) => `quick-${index}`}
               renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.quickMessagePill}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.quickMessagePill,
+                    (pressed || sending) && styles.quickMessagePillDim,
+                  ]}
                   onPress={() => handleSendMessage(item)}
                   disabled={sending}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Send quick message: ${item}`}
                 >
                   <Text style={styles.quickMessageText}>{item}</Text>
-                </TouchableOpacity>
+                </Pressable>
               )}
             />
           </View>
         )}
 
-        {/* Input */}
-        <View style={styles.inputContainer}>
-          <TouchableOpacity style={styles.emojiButton}>
-            <Ionicons name="happy-outline" size={24} color={COLORS.textSecondary} />
-          </TouchableOpacity>
-          
+        {/* Composer */}
+        <View style={styles.composer}>
           <TextInput
-            mode="flat"
-            placeholder="Type a message..."
+            placeholder="Message"
+            placeholderTextColor={palette.textFaint}
             value={inputText}
             onChangeText={setInputText}
             style={styles.input}
             multiline
             maxLength={500}
-            disabled={sending}
-            underlineColor="transparent"
-            activeUnderlineColor="transparent"
+            editable={!sending}
+            accessibilityLabel="Message"
           />
-          
-          <TouchableOpacity
-            style={[
-              styles.sendButton,
-              inputText.trim() && styles.sendButtonActive
-            ]}
-            onPress={() => handleSendMessage()}
-            disabled={!inputText.trim() || sending}
-          >
-            <Ionicons
-              name="send"
-              size={20}
-              color={inputText.trim() ? COLORS.white : COLORS.textSecondary}
-            />
-          </TouchableOpacity>
+          <IconButton
+            icon="send"
+            label="Send message"
+            tone={canSend ? 'primary' : 'neutral'}
+            size={44}
+            onPress={canSend ? () => handleSendMessage() : undefined}
+            style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
+          />
         </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  fill: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: palette.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: COLORS.white,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-  },
-  backButton: {
-    padding: 4,
-    marginRight: 8,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    backgroundColor: palette.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.border,
   },
   headerCenter: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  headerAvatar: {
-    backgroundColor: COLORS.lightPurple,
-    marginRight: 12,
+    marginLeft: space.sm,
   },
   headerInfo: {
     flex: 1,
+    marginLeft: space.sm,
   },
   headerTitle: {
     fontSize: 17,
-    fontWeight: '600',
-    color: COLORS.text,
+    fontWeight: font.semibold,
+    color: palette.text,
   },
   headerSubtitle: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
+    fontSize: 12,
+    color: palette.textMuted,
     marginTop: 2,
   },
-  headerActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  headerActionButton: {
-    padding: 4,
-  },
-  chatContainer: {
-    flex: 1,
-  },
   messagesList: {
-    padding: 16,
-    paddingBottom: 8,
+    paddingHorizontal: space.md,
+    paddingTop: space.md,
+    paddingBottom: space.xs,
     flexGrow: 1,
   },
-  messageContainer: {
-    flexDirection: 'row',
-    marginBottom: 16,
+  messageRow: {
+    marginBottom: space.sm,
+    maxWidth: '80%',
+  },
+  myMessageRow: {
+    alignSelf: 'flex-end',
     alignItems: 'flex-end',
   },
-  myMessageContainer: {
-    justifyContent: 'flex-end',
-  },
-  theirMessageContainer: {
-    justifyContent: 'flex-start',
-  },
-  avatar: {
-    backgroundColor: COLORS.lightPurple,
-    marginRight: 8,
+  theirMessageRow: {
+    alignSelf: 'flex-start',
+    alignItems: 'flex-start',
   },
   messageBubble: {
-    maxWidth: '75%',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs + 2,
+    borderRadius: radius.lg,
   },
   myMessageBubble: {
-    backgroundColor: COLORS.myMessage,
-    borderBottomRightRadius: 4,
+    backgroundColor: palette.primary,
+    borderBottomRightRadius: radius.sm / 2,
   },
   theirMessageBubble: {
-    backgroundColor: COLORS.theirMessage,
-    borderBottomLeftRadius: 4,
+    backgroundColor: palette.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.border,
+    borderBottomLeftRadius: radius.sm / 2,
   },
   messageText: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: COLORS.text,
+    fontSize: 15,
+    lineHeight: 21,
+    color: palette.text,
   },
   myMessageText: {
-    color: COLORS.white,
+    color: palette.onPrimary,
   },
   timeText: {
     fontSize: 11,
-    marginTop: 4,
-    color: COLORS.textSecondary,
+    marginTop: space.xxs,
+    marginHorizontal: space.xxs,
+    color: palette.textFaint,
   },
   myTimeText: {
-    color: 'rgba(255, 255, 255, 0.8)',
+    textAlign: 'right',
   },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 80,
+  quickMessagesContainer: {
+    paddingVertical: space.xs,
+    backgroundColor: palette.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.border,
   },
-  emptyText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginTop: 16,
+  quickMessagesList: {
+    paddingHorizontal: space.md,
+    gap: space.xs,
   },
-  emptySubtext: {
-    fontSize: 15,
-    color: COLORS.textSecondary,
-    marginTop: 8,
+  quickMessagePill: {
+    paddingHorizontal: space.sm,
+    paddingVertical: space.xs - 2,
+    backgroundColor: palette.primarySoft,
+    borderRadius: radius.pill,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 100,
+  quickMessagePillDim: {
+    opacity: 0.6,
   },
-  loadingText: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
+  quickMessageText: {
+    fontSize: 13,
+    color: palette.primaryDark,
+    fontWeight: font.medium,
   },
-  inputContainer: {
+  composer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: COLORS.white,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  emojiButton: {
-    padding: 8,
-    marginRight: 4,
+    alignItems: 'flex-end',
+    paddingHorizontal: space.md,
+    paddingTop: space.xs,
+    paddingBottom: space.sm,
+    backgroundColor: palette.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.border,
   },
   input: {
     flex: 1,
-    backgroundColor: COLORS.background,
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    maxHeight: 100,
-    fontSize: 16,
+    minHeight: 44,
+    maxHeight: 120,
+    paddingHorizontal: space.md,
+    paddingTop: space.sm,
+    paddingBottom: space.sm,
+    backgroundColor: palette.surfaceMuted,
+    borderRadius: radius.xl,
+    fontSize: 15,
+    color: palette.text,
   },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 8,
+    marginLeft: space.xs,
   },
-  sendButtonActive: {
-    backgroundColor: COLORS.primary,
-  },
-  quickMessagesContainer: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: COLORS.white,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  quickMessagesList: {
-    paddingHorizontal: 4,
-    gap: 8,
-  },
-  quickMessagePill: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: COLORS.lightPurple,
-    borderRadius: 20,
-    marginRight: 8,
-  },
-  quickMessageText: {
-    fontSize: 14,
-    color: COLORS.primary,
-    fontWeight: '500',
+  sendButtonDisabled: {
+    opacity: 0.6,
   },
 });

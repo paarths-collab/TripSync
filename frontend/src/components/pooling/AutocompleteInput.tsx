@@ -3,11 +3,13 @@ import React, { useState, useMemo } from 'react';
 import { TextInput } from 'react-native-paper';
 import debounce from 'lodash.debounce';
 import { getAutocompleteSuggestions, AutocompleteSuggestion } from '../../services/locationService';
+import { palette, radius } from '../../constants/theme';
 
 interface AutocompleteInputProps {
   label: string;
   onPlaceSelected: (place: AutocompleteSuggestion) => void;
-  onSuggestionsChange: (suggestions: AutocompleteSuggestion[]) => void;
+  /** Optional: callers that render their own suggestion list pass this. */
+  onSuggestionsChange?: (suggestions: AutocompleteSuggestion[]) => void;
 }
 
 export default function AutocompleteInput({
@@ -22,7 +24,7 @@ export default function AutocompleteInput({
     () =>
       debounce(async (text: string) => {
         if (text.length < 3) {
-          onSuggestionsChange([]); // Inform parent to clear suggestions
+          onSuggestionsChange?.([]); // Inform parent to clear suggestions
           setIsLoading(false);
           return;
         }
@@ -31,10 +33,10 @@ export default function AutocompleteInput({
         try {
           const results = await getAutocompleteSuggestions(text);
           console.log('Suggestions received:', results.length, 'results');
-          onSuggestionsChange(results); // Pass results to parent
+          onSuggestionsChange?.(results); // Pass results to parent
         } catch (error) {
           console.error('Error fetching autocomplete suggestions:', error);
-          onSuggestionsChange([]);
+          onSuggestionsChange?.([]);
         } finally {
           setIsLoading(false);
         }
@@ -46,17 +48,22 @@ export default function AutocompleteInput({
     setQuery(text);
     debouncedFetchSuggestions(text);
   };
-  
+
   return (
     <TextInput
-      label={label}
+      label={label || undefined}
       mode="outlined"
       value={query}
       onChangeText={handleTextChange}
-      right={isLoading ? <TextInput.Icon icon="timer-sand" /> : null}
-      autoFocus={true} 
-      placeholder="Enter a destination..."
-      style={{ marginHorizontal: 8 }}
+      left={<TextInput.Icon icon="magnify" color={palette.textMuted} />}
+      right={isLoading ? <TextInput.Icon icon="timer-sand" color={palette.textMuted} /> : null}
+      autoFocus={true}
+      placeholder="Search for a destination"
+      placeholderTextColor={palette.textFaint}
+      outlineColor={palette.border}
+      activeOutlineColor={palette.primary}
+      outlineStyle={{ borderRadius: radius.md }}
+      style={{ backgroundColor: palette.surface, fontSize: 15 }}
     />
   );
 }

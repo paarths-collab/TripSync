@@ -1,17 +1,12 @@
 // src/components/pooling/LocationSearchModal.tsx
 import React, { useState } from 'react';
-import {
-  View,
-  StyleSheet,
-  SafeAreaView,
-  FlatList,
-  TouchableOpacity,
-} from 'react-native';
-import { Modal, Portal, IconButton, List, Text } from 'react-native-paper';
-import { Ionicons } from '@expo/vector-icons';
+import { View, StyleSheet, SafeAreaView, FlatList } from 'react-native';
+import { Modal, Portal, List, Text } from 'react-native-paper';
 
 import AutocompleteInput from './AutocompleteInput';
 import { AutocompleteSuggestion } from '../../services/locationService';
+import { IconButton } from '../ui';
+import { palette, space, radius, font, shadow } from '../../constants/theme';
 
 interface LocationSearchModalProps {
   visible: boolean;
@@ -37,47 +32,62 @@ export default function LocationSearchModal({
 
   return (
     <Portal>
-      <Modal 
-        visible={visible} 
-        onDismiss={onDismiss} 
-        contentContainerStyle={styles.modal}
+      <Modal
+        visible={visible}
+        onDismiss={onDismiss}
+        contentContainerStyle={styles.sheet}
         style={styles.modalWrapper}
       >
-        {/* We use SafeAreaView as the primary container */}
         <SafeAreaView style={styles.container}>
-          
-          {/* --- HEADER: Contains the close button and the inputs --- */}
+          <View style={styles.handle} />
+
           <View style={styles.header}>
-            <IconButton icon="arrow-left" size={28} onPress={onDismiss} style={styles.closeButton} />
-            
-            {/* Input container with a cleaner visual style */}
-            <View style={styles.inputContainer}>
-              <View style={styles.locationRow}>
-                <Ionicons name="location-sharp" size={20} color="#3498db" />
-                <Text style={styles.locationText} numberOfLines={1}>{pickupLocationName}</Text>
-              </View>
-              <View style={styles.divider} />
-              {/* The AutocompleteInput is now part of this clean header */}
-              <AutocompleteInput
-                label="" // We no longer need the floating label
-                onPlaceSelected={onPlaceSelected}
-                onSuggestionsChange={setSuggestions}
-              />
+            <Text style={styles.title}>Where are you going?</Text>
+            <IconButton icon="close" label="Close search" onPress={onDismiss} size={36} />
+          </View>
+
+          <View style={styles.pickupRow}>
+            <View style={styles.pickupDot} />
+            <View style={styles.pickupTextWrap}>
+              <Text style={styles.pickupLabel}>Pickup</Text>
+              <Text style={styles.pickupText} numberOfLines={1}>
+                {pickupLocationName}
+              </Text>
             </View>
           </View>
 
-          {/* --- BODY: The suggestion list takes up all remaining space --- */}
+          <View style={styles.inputWrap}>
+            <AutocompleteInput
+              label=""
+              onPlaceSelected={onPlaceSelected}
+              onSuggestionsChange={setSuggestions}
+            />
+          </View>
+
           <FlatList
             data={suggestions}
             keyExtractor={(item) => item.place_id}
             renderItem={({ item }) => (
               <List.Item
-                title={item.description}
-                description={item.structured_formatting?.secondary_text} // Show secondary text if available
+                title={item.structured_formatting?.main_text || item.description}
+                description={item.structured_formatting?.secondary_text || undefined}
                 onPress={() => handleSuggestionPress(item)}
-                left={() => <List.Icon icon="map-marker-outline" style={{ justifyContent: 'center' }} />}
+                titleStyle={styles.itemTitle}
+                descriptionStyle={styles.itemDescription}
+                titleNumberOfLines={1}
+                descriptionNumberOfLines={1}
+                style={styles.item}
+                left={() => (
+                  <View style={styles.itemIcon}>
+                    <List.Icon icon="map-marker-outline" color={palette.primary} />
+                  </View>
+                )}
               />
             )}
+            ItemSeparatorComponent={() => <View style={styles.separator} />}
+            ListEmptyComponent={
+              <Text style={styles.hint}>Type at least 3 letters to see places.</Text>
+            }
             style={styles.list}
             keyboardShouldPersistTaps="handled"
           />
@@ -89,50 +99,103 @@ export default function LocationSearchModal({
 
 const styles = StyleSheet.create({
   modalWrapper: {
-    justifyContent: 'flex-end', // This positions the modal at the bottom
+    justifyContent: 'flex-end',
   },
-  modal: {
-    height: '60%', // Only take up 60% of the screen height
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+  sheet: {
+    height: '70%',
+    backgroundColor: palette.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    ...shadow.raised,
   },
   container: {
-    flex: 1, // Let SafeAreaView control the whole modal space
+    flex: 1,
+  },
+  handle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: palette.border,
+    marginTop: space.xs,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingRight: 16,
-    paddingTop: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    justifyContent: 'space-between',
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    paddingBottom: space.xs,
   },
-  closeButton: {
-    marginRight: 0,
+  title: {
+    fontSize: 20,
+    fontWeight: font.bold,
+    color: palette.text,
   },
-  inputContainer: {
-    flex: 1, // Allow the input container to take up the row's width
-    paddingVertical: 8,
-  },
-  locationRow: {
+  pickupRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: 10,
-    height: 40, // Give a fixed height for stability
+    marginHorizontal: space.lg,
+    marginTop: space.xs,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radius.md,
+    backgroundColor: palette.surfaceMuted,
   },
-  locationText: {
-    marginLeft: 10,
-    fontSize: 16,
-    color: '#333',
+  pickupDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: palette.success,
   },
-  divider: {
-    height: 1,
-    backgroundColor: '#eee',
-    marginVertical: 4,
-    marginLeft: 40,
+  pickupTextWrap: {
+    flex: 1,
+    marginLeft: space.sm,
+  },
+  pickupLabel: {
+    fontSize: 12,
+    color: palette.textMuted,
+    marginBottom: 2,
+  },
+  pickupText: {
+    fontSize: 15,
+    color: palette.text,
+    fontWeight: font.medium,
+  },
+  inputWrap: {
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    paddingBottom: space.xs,
   },
   list: {
-    flex: 1, // Take up remaining space
+    flex: 1,
+  },
+  item: {
+    paddingHorizontal: space.sm,
+  },
+  itemIcon: {
+    justifyContent: 'center',
+  },
+  itemTitle: {
+    fontSize: 15,
+    fontWeight: font.medium,
+    color: palette.text,
+  },
+  itemDescription: {
+    fontSize: 13,
+    color: palette.textMuted,
+  },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: palette.border,
+    marginLeft: space.xxxl + space.lg,
+    marginRight: space.lg,
+  },
+  hint: {
+    fontSize: 14,
+    color: palette.textMuted,
+    textAlign: 'center',
+    paddingHorizontal: space.xl,
+    paddingTop: space.xl,
   },
 });

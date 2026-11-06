@@ -1,14 +1,16 @@
 // src/components/pooling/RouteConfirmationCard.tsx
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Card, Text, Button } from 'react-native-paper';
+import { Text, Button } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteDetails } from '../../services/poolingService';
+import { IconBadge, IconButton } from '../ui';
+import { palette, space, radius, font, shadow } from '../../constants/theme';
 
 interface RouteConfirmationCardProps {
   destinationName: string;
-  // This prop is now optional. It can be a valid route object or null.
-  routeDetails: RouteDetails | null; 
+  // Optional: a valid route object or null when the route lookup failed.
+  routeDetails: RouteDetails | null;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -19,68 +21,130 @@ export default function RouteConfirmationCard({
   onConfirm,
   onCancel,
 }: RouteConfirmationCardProps) {
-  
-  // Helper to format the time and distance, only if routeDetails exists
   const distanceInKm = routeDetails ? (routeDetails.distance_meters / 1000).toFixed(1) : null;
   const durationInMinutes = routeDetails ? Math.round(routeDetails.duration_seconds / 60) : null;
 
   return (
-    <Card style={styles.card} elevation={5}>
-      <Card.Title
-        title={destinationName}
-        titleVariant="titleLarge"
-        // The cancel button is always available
-        right={(props) => <Button {...props} onPress={onCancel}>Cancel</Button>}
-      />
-      <Card.Content>
-        {/* --- THIS IS THE KEY CHANGE --- */}
-        {/* We only render the details row if we actually have route details. */}
-        {routeDetails && (
-          <View style={styles.detailsRow}>
-            <Ionicons name="map" size={20} color="#888" />
-            <Text style={styles.detailText}>{distanceInKm} km</Text>
-            <Ionicons name="time" size={20} color="#888" style={{ marginLeft: 20 }}/>
-            <Text style={styles.detailText}>Approx. {durationInMinutes} mins</Text>
+    <View style={styles.sheet}>
+      <View style={styles.handle} />
+
+      <View style={styles.header}>
+        <IconBadge icon="flag" tone="primary" size={44} />
+        <View style={styles.headerText}>
+          <Text style={styles.eyebrow}>Destination</Text>
+          <Text style={styles.title} numberOfLines={2}>
+            {destinationName}
+          </Text>
+        </View>
+        <IconButton icon="close" label="Cancel and choose another destination" onPress={onCancel} size={36} />
+      </View>
+
+      {routeDetails && (
+        <View style={styles.statsRow}>
+          <View style={styles.stat}>
+            <Ionicons name="navigate-outline" size={16} color={palette.textMuted} />
+            <Text style={styles.statText}>{distanceInKm} km</Text>
           </View>
-        )}
-        
-        {/* The confirm button is always visible, allowing the user to proceed. */}
-        <Button
-          mode="contained"
-          onPress={onConfirm}
-          style={styles.confirmButton}
-          labelStyle={{ fontSize: 16 }}
-        >
-          Confirm & Find Matches
-        </Button>
-      </Card.Content>
-    </Card>
+          <View style={styles.stat}>
+            <Ionicons name="time-outline" size={16} color={palette.textMuted} />
+            <Text style={styles.statText}>About {durationInMinutes} min</Text>
+          </View>
+        </View>
+      )}
+
+      <Text style={styles.body}>
+        We&apos;ll look for other students heading the same way. If you agree to share, you book
+        and pay for the taxi yourselves.
+      </Text>
+
+      <Button
+        mode="contained"
+        onPress={onConfirm}
+        style={styles.confirmButton}
+        contentStyle={styles.buttonContent}
+        labelStyle={styles.buttonLabel}
+      >
+        Find a ride partner
+      </Button>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  sheet: {
     position: 'absolute',
-    bottom: 20,
-    left: 15,
-    right: 15,
-    backgroundColor: '#fff',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: palette.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.xl,
+    ...shadow.raised,
   },
-  detailsRow: {
+  handle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: radius.pill,
+    backgroundColor: palette.border,
+    marginTop: space.xs,
+    marginBottom: space.md,
+  },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-    marginTop: 10,
   },
-  detailText: {
-    marginLeft: 8,
-    fontSize: 16,
-    color: '#333',
+  headerText: {
+    flex: 1,
+    marginHorizontal: space.sm,
+  },
+  eyebrow: {
+    fontSize: 12,
+    color: palette.textMuted,
+    marginBottom: 2,
+  },
+  title: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: font.semibold,
+    color: palette.text,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: space.xs,
+    marginTop: space.md,
+  },
+  stat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xxs,
+    paddingHorizontal: space.sm,
+    paddingVertical: space.xxs + 2,
+    borderRadius: radius.pill,
+    backgroundColor: palette.surfaceMuted,
+  },
+  statText: {
+    fontSize: 13,
+    fontWeight: font.medium,
+    color: palette.text,
+  },
+  body: {
+    marginTop: space.md,
+    fontSize: 14,
+    lineHeight: 20,
+    color: palette.textMuted,
   },
   confirmButton: {
-    paddingVertical: 5,
-    // Add a top margin if the route details are missing, for better spacing
-    marginTop: 10, 
+    marginTop: space.lg,
+    borderRadius: radius.md,
+  },
+  buttonContent: {
+    height: 50,
+  },
+  buttonLabel: {
+    fontSize: 16,
+    fontWeight: font.semibold,
   },
 });

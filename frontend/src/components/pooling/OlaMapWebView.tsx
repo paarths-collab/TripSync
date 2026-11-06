@@ -3,6 +3,7 @@ import React, { useMemo, forwardRef, useEffect } from 'react';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import { OLA_MAPS_API_KEY } from '../../constants/config';
+import { palette } from '../../constants/theme';
 
 const TILESET_URL = 'https://api.olamaps.io/tiles/vector/v1/3dtiles/tileset.json';
 
@@ -18,7 +19,7 @@ const OlaMapWebView = forwardRef<WebView, OlaMapWebViewProps>(({ onMapReady, onM
 <html>
   <head>
     <meta name="viewport" content="initial-scale=1, width=device-width, user-scalable=no" />
-    <style> html,body,#map { height:100%; margin:0; padding:0; } </style>
+    <style> html,body,#map { height:100%; margin:0; padding:0; background:${palette.background}; } </style>
     <script src="https://cdn.jsdelivr.net/npm/olamaps-web-sdk@1.1.4/dist/olamaps-web-sdk.umd.min.js"></script>
   </head>
   <body>
@@ -80,8 +81,8 @@ const OlaMapWebView = forwardRef<WebView, OlaMapWebViewProps>(({ onMapReady, onM
               }
             },
             'paint': { 
-              'line-color': '#00AEEF', 
-              'line-width': 8,
+              'line-color': '${palette.primary}',
+              'line-width': 6,
               'line-cap': 'round',
               'line-join': 'round'
             }
@@ -179,5 +180,7 @@ const OlaMapWebView = forwardRef<WebView, OlaMapWebViewProps>(({ onMapReady, onM
     />
   );
 });
+
+OlaMapWebView.displayName = 'OlaMapWebView';
 
 export default OlaMapWebView;

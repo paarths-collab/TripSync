@@ -2,12 +2,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 
 // --- Local Hooks & Context ---
 import { useLocation } from '../../hooks/useLocation';
 import { useAuth } from '../../context/AuthContext';
 import { usePoolingSocket } from '../../hooks/usePoolingSocket';
+import { usePoolingRecovery } from '../../hooks/usePoolingRecovery';
 
 // --- API Service Functions & Types ---
 import {
@@ -21,12 +22,11 @@ import {
   RouteDetails,
   MatchedUser,
   createRequestAndFindMatches,
-  RouteResult,
   sendConnectionRequest,
   respondToConnection,
-  getActiveConnection,
   cancelPoolingRequest,
-  ActiveConnection
+  ActiveConnection,
+  CurrentPoolingState,
 } from '../../services/poolingService';
 
 // --- UI Components ---
@@ -43,10 +43,10 @@ type ScreenState = 'idle' | 'confirming_route' | 'searching' | 'results' | 'conn
 type MapPitch = 60 | 0;
 
 export default function PoolingScreen() {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const router = useRouter();
   const { location: liveLocation, getUserLocation } = useLocation();
-  const { match, connectionUpdate, chatMessage, connect, disconnect, clearMatch, sendWebSocketMessage } = usePoolingSocket(token);
+  const { match, connectionUpdate, connect, disconnect, clearMatch } = usePoolingSocket(token);
 
   const [isSearchModalVisible, setIsSearchModalVisible] = useState(false);
   const [screenState, setScreenState] = useState<ScreenState>('idle');
@@ -58,42 +58,38 @@ export default function PoolingScreen() {
   const [mapPitch, setMapPitch] = useState<MapPitch>(60);
   const [activeConnection, setActiveConnection] = useState<ActiveConnection | null>(null);
   const [currentRequestId, setCurrentRequestId] = useState<number | null>(null);
-  const [showPartnerProfile, setShowPartnerProfile] = useState(false);
 
   const webViewRef = useRef<WebView>(null);
   const isMapReady = useRef(false);
 
-  // --- Check for active connection on mount ---
-  useEffect(() => {
-    const checkActiveConnection = async () => {
-      if (!token) return;
-      try {
-        console.log('Checking for active connection on mount...');
-        const result = await getActiveConnection(token);
-        console.log('Active connection result:', result);
-        if (result.connection) {
-          console.log('Found active connection, setting state', {
-            connectionId: result.connection.id,
-            partnerId: result.connection.partner.id,
-            partnerRequestId: result.connection.partner.request_id,
-            userRequestId: result.connection.user_request_id
-          });
-          setActiveConnection(result.connection);
-          setCurrentRequestId(result.connection.user_request_id); // Use own request ID for end ride
-          setScreenState('active_ride');
-        } else {
-          console.log('No active connection found');
-        }
-      } catch (error) {
-        console.log('Error checking active connection:', error);
-      }
-    };
-    checkActiveConnection();
-  }, [token]);
+  const applyRecoveredState = (result: CurrentPoolingState) => {
+    if (result.connection) {
+      const sameRide = activeConnection?.id === result.connection.id;
+      setActiveConnection(result.connection);
+      setCurrentRequestId(result.connection.user_request_id);
+      if (!sameRide) setScreenState('active_ride');
+      connect();
+    } else if (activeConnection) {
+      // REST is authoritative even if the cancellation push was lost.
+      setActiveConnection(null);
+      setCurrentRequestId(null);
+      setMatches([]);
+      setSelectedDestination(null);
+      setRouteDetails(null);
+      setScreenState('idle');
+      clearMatch();
+      disconnect();
+      webViewRef.current?.injectJavaScript('window.clearRoute(); window.clearDestinationMarker(); true;');
+    }
+  };
+  const { invalidate: invalidateRecovery, runAction: withPoolingMutation } = usePoolingRecovery(token, applyRecoveredState);
+  const processedUpdate = useRef<typeof connectionUpdate>(null);
 
   // --- Handle WebSocket connection updates ---
   useEffect(() => {
-    if (!connectionUpdate) return;
+    if (!connectionUpdate || processedUpdate.current === connectionUpdate) return;
+    processedUpdate.current = connectionUpdate;
+    invalidateRecovery();
 
     const { type, data } = connectionUpdate;
 
@@ -103,7 +99,7 @@ export default function PoolingScreen() {
       setMatches(prevMatches => {
         const updated = prevMatches.map(m => 
           m.id === data.to_user?.id
-            ? { ...m, connection_status: 'pending_sent', connection_id: data.connection_id }
+            ? { ...m, connection_status: 'pending_sent' as const, connection_id: data.connection_id }
             : m
         );
         console.log('Updated matches after request sent:', updated);
@@ -115,7 +111,7 @@ export default function PoolingScreen() {
       setMatches(prevMatches => {
         const updated = prevMatches.map(m => 
           m.id === data.from_user?.id
-            ? { ...m, connection_status: 'pending_received', connection_id: data.connection_id }
+            ? { ...m, connection_status: 'pending_received' as const, connection_id: data.connection_id }
             : m
         );
         console.log('Updated matches after request received:', updated);
@@ -147,7 +143,6 @@ export default function PoolingScreen() {
         setActiveConnection(activeConn);
         setCurrentRequestId(userRequestId);
         setScreenState('connection_modal'); // Show modal first
-        disconnect();
       }
     } else if (type === 'rejected') {
       // Update match status to rejected
@@ -159,22 +154,19 @@ export default function PoolingScreen() {
         )
       );
     } else if (type === 'cancelled' || type === 'ride_cancelled') {
+      if (activeConnection && data.connection_id && activeConnection.id !== data.connection_id) return;
       // Partner cancelled, go back to idle
       setActiveConnection(null);
       setScreenState('idle');
       setCurrentRequestId(null);
       setMatches([]);
-      if (type === 'ride_cancelled') {
-        Alert.alert(
-          'Ride Ended',
-          `${data.by_user?.full_name || 'Your partner'} has ended the ride.`,
-          [{ text: 'OK', onPress: handleNewSearch }]
-        );
-      } else {
-        handleNewSearch();
-      }
+      setSelectedDestination(null);
+      setRouteDetails(null);
+      clearMatch();
+      disconnect();
+      webViewRef.current?.injectJavaScript('window.clearRoute(); window.clearDestinationMarker(); true;');
     }
-  }, [connectionUpdate, token]);
+  }, [connectionUpdate, currentRequestId, activeConnection, invalidateRecovery, clearMatch, disconnect]);
 
   // --- Map and Location Logic ---
 
@@ -308,21 +300,20 @@ export default function PoolingScreen() {
 
     try {
         const destCoords = selectedDestination.geometry.location;
-        const response = await createRequestAndFindMatches(token, {
-            start_latitude: mapCenter.lat,
-            start_longitude: mapCenter.lng,
-            destination_latitude: destCoords.lat,
-            destination_longitude: destCoords.lng,
-            destination_name: selectedDestination.name,
+        await withPoolingMutation(async () => {
+          const response = await createRequestAndFindMatches(token, {
+              start_latitude: mapCenter.lat,
+              start_longitude: mapCenter.lng,
+              destination_latitude: destCoords.lat,
+              destination_longitude: destCoords.lng,
+              destination_name: selectedDestination.name,
+          });
+          setCurrentRequestId(response.request_id);
+          if (response.matches.length > 0) {
+              setMatches(response.matches);
+              setScreenState('results');
+          }
         });
-
-        setCurrentRequestId(response.request_id);
-        
-        if (response.matches.length > 0) {
-            setMatches(response.matches);
-            setScreenState('results');
-            // Keep WebSocket connected so users can receive request notifications
-        }
     } catch (error: any) {
         Alert.alert('Search Failed', error.message);
         setScreenState('confirming_route');
@@ -330,7 +321,7 @@ export default function PoolingScreen() {
     }
   };
   
-  const handleNewSearch = async () => {
+  const handleNewSearch = async () => withPoolingMutation(async () => {
     console.log('handleNewSearch called - resetting to idle state');
     
     // Disconnect WebSocket when starting new search
@@ -359,7 +350,7 @@ export default function PoolingScreen() {
         webViewRef.current.injectJavaScript('window.clearRoute(); true;');
         webViewRef.current.injectJavaScript('window.clearDestinationMarker(); true;');
     }
-  };
+  });
 
   // --- Connection Management ---
   
@@ -390,8 +381,8 @@ export default function PoolingScreen() {
   const handleApprove = async (connectionId: number) => {
     if (!token) return;
     try {
-      await respondToConnection(token, connectionId, 'approve');
-      // WebSocket will handle the transition to active_ride
+      await withPoolingMutation(() => respondToConnection(token, connectionId, 'approve'));
+      // Socket delivery accelerates the REST reconciliation after this action.
     } catch (error: any) {
       Alert.alert('Error', error.message);
     }
@@ -413,7 +404,7 @@ export default function PoolingScreen() {
     }
   };
 
-  const handleEndRide = async () => {
+  const handleEndRide = async () => withPoolingMutation(async () => {
     console.log('handleEndRide called - token:', !!token, 'currentRequestId:', currentRequestId);
     
     if (!token || !currentRequestId) {
@@ -449,7 +440,7 @@ export default function PoolingScreen() {
         webViewRef.current.injectJavaScript('window.clearDestinationMarker(); true;');
       }
     }
-  };
+  });
 
   const handleStartChat = async () => {
     if (!activeConnection) return;
@@ -465,10 +456,6 @@ export default function PoolingScreen() {
         partnerName: activeConnection.partner.full_name,
       },
     });
-  };
-
-  const handleViewPartnerProfile = () => {
-    setShowPartnerProfile(true);
   };
 
   const handleContinueToActiveRide = () => {
@@ -573,6 +560,8 @@ export default function PoolingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    // Matches palette.background. Kept literal: the pooling screen test stubs
+    // react-native, so importing constants/theme here would break it.
+    backgroundColor: '#F6F5FB',
   },
 });

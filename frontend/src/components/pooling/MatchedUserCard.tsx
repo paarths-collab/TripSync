@@ -1,17 +1,11 @@
 // src/components/pooling/MatchedUserCard.tsx
 import React, { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Card, Text, Button, Avatar } from 'react-native-paper';
+import { Text, Button } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
 import { MatchedUser } from '../../services/poolingService';
-
-const COLORS = {
-  primary: '#6A5AE0',
-  white: '#FFFFFF',
-  success: '#28A745',
-  error: '#DC3545',
-  gray: '#6C757D',
-};
+import { Avatar, Card, StatusPill } from '../ui';
+import { palette, space, radius, font, Tone } from '../../constants/theme';
 
 interface MatchedUserCardProps {
   user: MatchedUser;
@@ -19,6 +13,13 @@ interface MatchedUserCardProps {
   onApprove: (connectionId: number) => Promise<void>;
   onReject: (connectionId: number) => Promise<void>;
 }
+
+const STATUS_PILL: Record<string, { label: string; tone: Tone } | undefined> = {
+  pending_sent: { label: 'Request sent', tone: 'info' },
+  pending_received: { label: 'Wants to share', tone: 'warning' },
+  approved: { label: 'Matched', tone: 'success' },
+  rejected: { label: 'Declined', tone: 'danger' },
+};
 
 export default function MatchedUserCard({ user, onSendRequest, onApprove, onReject }: MatchedUserCardProps) {
   const [loading, setLoading] = useState(false);
@@ -56,65 +57,74 @@ export default function MatchedUserCard({ user, onSendRequest, onApprove, onReje
     }
   };
 
-  const renderActions = () => {
-    const status = user.connection_status || 'none';
+  const status = user.connection_status || 'none';
+  const pill = STATUS_PILL[status];
 
+  const renderActions = () => {
     if (status === 'none' || status === 'rejected') {
       return (
-        <Button 
-          mode="contained" 
+        <Button
+          mode="contained"
           onPress={handleSendRequest}
           loading={loading}
           disabled={loading}
-          style={[styles.button, { backgroundColor: COLORS.primary }]}
-          icon={() => <Ionicons name="paper-plane" size={18} color={COLORS.white} />}
+          style={styles.button}
+          contentStyle={styles.buttonContent}
+          labelStyle={styles.buttonLabel}
+          icon={() => <Ionicons name="paper-plane" size={16} color={palette.onPrimary} />}
         >
-          Send Request
+          Send request
         </Button>
       );
     }
 
     if (status === 'pending_sent') {
       return (
-        <Button 
-          mode="outlined" 
+        <Button
+          mode="outlined"
           disabled
           style={styles.button}
-          icon={() => <Ionicons name="time" size={18} color={COLORS.gray} />}
+          contentStyle={styles.buttonContent}
+          labelStyle={styles.buttonLabel}
+          icon={() => <Ionicons name="time-outline" size={16} color={palette.textMuted} />}
         >
-          Request Sent
+          Waiting for a reply
         </Button>
       );
     }
 
     if (status === 'pending_received') {
       return (
-        <View style={styles.responseButtons}>
-          <View style={styles.notificationBadge}>
-            <Ionicons name="notifications" size={16} color={COLORS.white} />
-            <Text variant="bodySmall" style={styles.notificationText}>
-              {user.full_name} sent you a pooling request
+        <View>
+          <View style={styles.notice}>
+            <Ionicons name="notifications-outline" size={16} color={palette.primaryDark} />
+            <Text style={styles.noticeText}>
+              {user.full_name} asked to share a ride with you
             </Text>
           </View>
           <View style={styles.buttonRow}>
-            <Button 
+            <Button
               mode="contained"
               onPress={handleApprove}
               loading={loading}
               disabled={loading}
-              style={[styles.responseButton, { backgroundColor: COLORS.success }]}
-              icon={() => <Ionicons name="checkmark-circle" size={18} color={COLORS.white} />}
+              style={[styles.button, styles.rowButton]}
+              contentStyle={styles.buttonContent}
+              labelStyle={styles.buttonLabel}
+              icon={() => <Ionicons name="checkmark" size={16} color={palette.onPrimary} />}
             >
-              Accept Request
+              Accept
             </Button>
-            <Button 
+            <Button
               mode="outlined"
               onPress={handleReject}
               loading={loading}
               disabled={loading}
-              style={[styles.responseButton, { borderColor: COLORS.error }]}
-              labelStyle={{ color: COLORS.error }}
-              icon={() => <Ionicons name="close-circle" size={18} color={COLORS.error} />}
+              textColor={palette.danger}
+              style={[styles.button, styles.rowButton, styles.dangerOutline]}
+              contentStyle={styles.buttonContent}
+              labelStyle={styles.buttonLabel}
+              icon={() => <Ionicons name="close" size={16} color={palette.danger} />}
             >
               Decline
             </Button>
@@ -125,13 +135,10 @@ export default function MatchedUserCard({ user, onSendRequest, onApprove, onReje
 
     if (status === 'approved') {
       return (
-        <Button 
-          mode="contained"
-          style={[styles.button, { backgroundColor: COLORS.primary }]}
-          icon={() => <Ionicons name="checkmark-done-circle" size={18} color={COLORS.white} />}
-        >
-          Connected
-        </Button>
+        <View style={styles.approvedRow}>
+          <Ionicons name="checkmark-circle" size={18} color={palette.success} />
+          <Text style={styles.approvedText}>You both agreed to share this ride.</Text>
+        </View>
       );
     }
 
@@ -140,76 +147,99 @@ export default function MatchedUserCard({ user, onSendRequest, onApprove, onReje
 
   return (
     <Card style={styles.card}>
-      <Card.Title
-        title={user.full_name}
-        titleStyle={styles.title}
-        left={(props) => (
-          <Avatar.Icon 
-            {...props} 
-            icon="account" 
-            style={styles.avatar}
-            color={COLORS.primary}
-          />
-        )}
-      />
-      <Card.Content>
-        {renderActions()}
-      </Card.Content>
+      <View style={styles.header}>
+        <Avatar name={user.full_name} size={48} />
+        <View style={styles.headerText}>
+          <Text style={styles.name} numberOfLines={1}>
+            {user.full_name}
+          </Text>
+          {user.year_of_study ? (
+            <Text style={styles.meta} numberOfLines={1}>
+              {user.year_of_study}
+            </Text>
+          ) : null}
+        </View>
+        {pill ? <StatusPill label={pill.label} tone={pill.tone} /> : null}
+      </View>
+      <View style={styles.actions}>{renderActions()}</View>
     </Card>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    marginBottom: 16,
-    backgroundColor: COLORS.white,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    borderRadius: 12,
+    marginBottom: space.sm,
   },
-  avatar: {
-    backgroundColor: '#E8E5FA',
-  },
-  title: {
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  button: {
-    marginTop: 8,
-    borderRadius: 8,
-  },
-  responseButtons: {
-    marginTop: 8,
-  },
-  notificationBadge: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginBottom: 12,
-    gap: 8,
   },
-  notificationText: {
-    color: COLORS.white,
-    fontWeight: '600',
+  headerText: {
     flex: 1,
+    marginHorizontal: space.sm,
   },
-  requestText: {
-    color: COLORS.gray,
-    marginBottom: 12,
-    textAlign: 'center',
+  name: {
+    fontSize: 16,
+    fontWeight: font.semibold,
+    color: palette.text,
+  },
+  meta: {
+    marginTop: 2,
+    fontSize: 13,
+    color: palette.textMuted,
+  },
+  actions: {
+    marginTop: space.md,
+  },
+  button: {
+    borderRadius: radius.md,
+  },
+  buttonContent: {
+    height: 44,
+  },
+  buttonLabel: {
+    fontSize: 14,
+    fontWeight: font.semibold,
+  },
+  dangerOutline: {
+    borderColor: palette.danger,
+  },
+  notice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    backgroundColor: palette.primarySoft,
+    paddingHorizontal: space.sm,
+    paddingVertical: space.sm,
+    borderRadius: radius.sm,
+    marginBottom: space.sm,
+  },
+  noticeText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: font.medium,
+    color: palette.primaryDark,
   },
   buttonRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: space.xs,
   },
-  responseButton: {
+  rowButton: {
     flex: 1,
-    borderRadius: 8,
+  },
+  approvedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.sm,
+    backgroundColor: palette.successSoft,
+  },
+  approvedText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: font.medium,
+    color: palette.success,
   },
 });
