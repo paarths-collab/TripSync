@@ -1,6 +1,6 @@
 // src/hooks/usePoolingSocket.ts
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { MatchedUser } from '../services/poolingService';
 import { API_BASE_URL } from '../constants/config';
 import { Alert } from 'react-native';
@@ -34,7 +34,7 @@ export function usePoolingSocket(token: string | null) {
   const socketRef = useRef<WebSocket | null>(null);
 
   // This function will be called by our UI to start the connection
-  const connect = () => {
+  const connect = useCallback(() => {
     if (!token) {
       setError('Cannot connect without an authentication token.');
       return;
@@ -54,12 +54,14 @@ export function usePoolingSocket(token: string | null) {
     socketRef.current = ws;
 
     ws.onopen = () => {
+      if (socketRef.current !== ws) return;
       console.log('WebSocket connection opened.');
       setIsConnected(true);
       setError(null);
     };
 
     ws.onmessage = (event) => {
+      if (socketRef.current !== ws) return;
       console.log('Received message from server:', event.data);
       try {
         const message: WebSocketMessage = JSON.parse(event.data);
@@ -129,46 +131,52 @@ export function usePoolingSocket(token: string | null) {
     };
 
     ws.onerror = (e) => {
+      if (socketRef.current !== ws) return;
       console.error('WebSocket error:', e);
       setError('A connection error occurred.');
       setIsConnected(false);
     };
 
     ws.onclose = (e) => {
+      if (socketRef.current !== ws) return;
       console.log('WebSocket connection closed:', e.code, e.reason);
       setIsConnected(false);
       socketRef.current = null; // Clean up the ref
     };
-  };
+  }, [token]);
 
   // This function will be called by our UI to close the connection
-  const disconnect = () => {
-    if (socketRef.current) {
-      socketRef.current.close();
-    }
-  };
+  const disconnect = useCallback(() => {
+    const socket = socketRef.current;
+    socketRef.current = null;
+    setIsConnected(false);
+    socket?.close();
+  }, []);
 
   // This function clears the match state
-  const clearMatch = () => {
+  const clearMatch = useCallback(() => {
     setMatch(null);
-  };
+  }, []);
 
   // Send a message through WebSocket
-  const sendWebSocketMessage = (message: any) => {
+  const sendWebSocketMessage = useCallback((message: any) => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(message));
     } else {
       console.error('WebSocket is not connected');
     }
-  };
+  }, []);
 
   // This useEffect ensures that if the component using the hook unmounts,
   // the WebSocket connection is cleanly closed.
   useEffect(() => {
+    setMatch(null);
+    setConnectionUpdate(null);
+    setChatMessage(null);
     return () => {
       disconnect();
     };
-  }, []);
+  }, [token, disconnect]);
 
   return { 
     isConnected, 

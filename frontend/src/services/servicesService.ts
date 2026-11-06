@@ -16,7 +16,7 @@ export interface ServicePost {
   id: number;
   title: string;
   description: string;
-  poster_user_id: number;
+  poster_user_id: number | null;
   status: 'open' | 'in_progress' | 'completed' | 'cancelled';
   team_size: number;
   deadline?: string;
@@ -70,7 +70,8 @@ export interface ServiceApplication {
 
 export const getAllServicePosts = async (
   searchQuery?: string,
-  tags?: string[]
+  tags?: string[],
+  token?: string | null,
 ): Promise<ServicePost[]> => {
   try {
     const params = new URLSearchParams();
@@ -81,7 +82,9 @@ export const getAllServicePosts = async (
       tags.forEach(tag => params.append('tags', tag));
     }
 
-    const response = await apiClient.get(`/services?${params.toString()}`);
+    const response = await apiClient.get(`/services?${params.toString()}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     return response.data;
   } catch (error: any) {
     console.error('Get all service posts failed:', error.response?.data || error.message);
@@ -89,9 +92,11 @@ export const getAllServicePosts = async (
   }
 };
 
-export const getServicePostById = async (postId: number): Promise<ServicePost> => {
+export const getServicePostById = async (postId: number, token?: string | null): Promise<ServicePost> => {
   try {
-    const response = await apiClient.get(`/services/${postId}`);
+    const response = await apiClient.get(`/services/${postId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     return response.data;
   } catch (error: any) {
     console.error(`Get service post by ID ${postId} failed:`, error.response?.data || error.message);

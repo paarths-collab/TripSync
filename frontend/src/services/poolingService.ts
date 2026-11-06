@@ -38,6 +38,20 @@ export interface ActiveConnection {
   partner: MatchedUser;
 }
 
+export interface CurrentPoolingState {
+  request: { id: number; status: string; destination_name: string | null; created_at: string } | null;
+  connection: ActiveConnection | null;
+  ride_ended: boolean;
+}
+
+export const getCurrentPoolingState = async (token: string): Promise<CurrentPoolingState> => {
+  const response = await apiClient.get<CurrentPoolingState>('/pool/requests/current', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  // A failed request must not be interpreted as an ended ride.
+  return response.data;
+};
+
 interface RouteRequestData {
   start_lat: number;
   start_lng: number;
