@@ -2,6 +2,20 @@
 
 import apiClient from './api';
 
+// Privacy: request/response bodies carry names, contact details and
+// coordinates, so nothing here logs them.
+
+/** Server errors are either {detail: "text"} or {detail: {code, message}}. */
+export function apiErrorMessage(error: any, fallback: string): string {
+  const status = error?.response?.status;
+  if (status === 429) return 'Too many requests. Please wait a moment and try again.';
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail.message === 'string' && detail.message.trim()) return detail.message;
+  if (!error?.response) return "Can't reach the server. Check your connection and try again.";
+  return fallback;
+}
+
 // --- INTERFACES / TYPES ---
 
 interface PoolingRequestData {
@@ -60,10 +74,10 @@ interface RouteRequestData {
 }
 
 export interface RouteDetails {
-  polyline: [number, number][];
+  polyline: [number, number][]; // [lng, lat] pairs
   distance_meters: number;
   duration_seconds: number;
-  is_fallback: boolean;
+  is_fallback?: boolean;
 }
 
 // --- NEW: A result type for our resilient function ---
@@ -86,8 +100,7 @@ export const createRequestAndFindMatches = async (
     });
     return response.data;
   } catch (error: any) {
-    console.error('Pooling request API error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.detail || 'Failed to find matches.');
+    throw new Error(apiErrorMessage(error, 'Could not search for students right now.'));
   }
 };
 
@@ -111,9 +124,8 @@ export const getRouteDetails = async (
       return { success: false, route: null, error: 'Invalid route response from server.' };
     }
   } catch (error: any) {
-    // On any failure (404, 500, network error), return a failure object.
-    const errorMessage = error.response?.data?.detail || 'Failed to calculate route.';
-    return { success: false, route: null, error: errorMessage };
+    // On any failure (404, 429, 5xx, network error), return a failure object.
+    return { success: false, route: null, error: apiErrorMessage(error, 'Route preview unavailable.') };
   }
 };
 
@@ -123,18 +135,15 @@ export const sendConnectionRequest = async (
   token: string,
   targetRequestId: number
 ): Promise<any> => {
-  console.log('poolingService - sendConnectionRequest called with:', { targetRequestId });
   try {
     const response = await apiClient.post(
       '/pool/connections/send',
       { target_request_id: targetRequestId },
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    console.log('poolingService - Connection request response:', response.data);
     return response.data;
   } catch (error: any) {
-    console.error('poolingService - Send connection error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.detail || 'Failed to send connection request.');
+    throw new Error(apiErrorMessage(error, 'Could not send the request.'));
   }
 };
 
@@ -151,8 +160,7 @@ export const respondToConnection = async (
     );
     return response.data;
   } catch (error: any) {
-    console.error('Respond to connection error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.detail || 'Failed to respond to connection.');
+    throw new Error(apiErrorMessage(error, 'Could not respond to the request.'));
   }
 };
 
@@ -164,8 +172,8 @@ export const getActiveConnection = async (
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
-  } catch (error: any) {
-    console.error('Get active connection error:', error.response?.data || error.message);
+  } catch {
+    console.warn('Could not load the active trip match');
     return { connection: null };
   }
 };
@@ -180,7 +188,6 @@ export const cancelPoolingRequest = async (
     });
     return response.data;
   } catch (error: any) {
-    console.error('Cancel request error:', error.response?.data || error.message);
-    throw new Error(error.response?.data?.detail || 'Failed to cancel request.');
+    throw new Error(apiErrorMessage(error, 'Could not cancel the request.'));
   }
 };

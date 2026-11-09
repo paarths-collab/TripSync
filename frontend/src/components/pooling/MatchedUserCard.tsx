@@ -1,11 +1,12 @@
 // src/components/pooling/MatchedUserCard.tsx
 import React, { useState } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Text, Button } from 'react-native-paper';
+import { StyleSheet, View } from 'react-native';
+import { Text } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
+
 import { MatchedUser } from '../../services/poolingService';
-import { Avatar, Card, StatusPill } from '../ui';
-import { palette, space, radius, font, Tone } from '../../constants/theme';
+import { Avatar, Button, Card, Tag } from '../ui';
+import { palette, radius, space, type, Tone } from '../../constants/theme';
 
 interface MatchedUserCardProps {
   user: MatchedUser;
@@ -14,9 +15,9 @@ interface MatchedUserCardProps {
   onReject: (connectionId: number) => Promise<void>;
 }
 
-const STATUS_PILL: Record<string, { label: string; tone: Tone } | undefined> = {
+const STATUS_TAG: Record<string, { label: string; tone: Tone } | undefined> = {
   pending_sent: { label: 'Request sent', tone: 'info' },
-  pending_received: { label: 'Wants to share', tone: 'warning' },
+  pending_received: { label: 'Wants to share', tone: 'primary' },
   approved: { label: 'Matched', tone: 'success' },
   rejected: { label: 'Declined', tone: 'danger' },
 };
@@ -24,110 +25,62 @@ const STATUS_PILL: Record<string, { label: string; tone: Tone } | undefined> = {
 export default function MatchedUserCard({ user, onSendRequest, onApprove, onReject }: MatchedUserCardProps) {
   const [loading, setLoading] = useState(false);
 
-  const handleSendRequest = async () => {
-    console.log('MatchedUserCard - Send request button pressed for user:', user.id, 'request_id:', user.request_id);
+  const run = async (action: () => Promise<void>) => {
     setLoading(true);
     try {
-      await onSendRequest(user.request_id);
-      console.log('MatchedUserCard - Request sent successfully');
-    } catch (error) {
-      console.error('MatchedUserCard - Error sending request:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleApprove = async () => {
-    if (!user.connection_id) return;
-    setLoading(true);
-    try {
-      await onApprove(user.connection_id);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleReject = async () => {
-    if (!user.connection_id) return;
-    setLoading(true);
-    try {
-      await onReject(user.connection_id);
+      await action();
+    } catch {
+      // The screen shows the error; just stop the spinner here.
     } finally {
       setLoading(false);
     }
   };
 
   const status = user.connection_status || 'none';
-  const pill = STATUS_PILL[status];
+  const tag = STATUS_TAG[status];
 
   const renderActions = () => {
     if (status === 'none' || status === 'rejected') {
       return (
         <Button
-          mode="contained"
-          onPress={handleSendRequest}
+          label={status === 'rejected' ? 'Send another request' : 'Send request'}
+          icon="paper-plane"
+          size="md"
+          onPress={() => run(() => onSendRequest(user.request_id))}
           loading={loading}
-          disabled={loading}
-          style={styles.button}
-          contentStyle={styles.buttonContent}
-          labelStyle={styles.buttonLabel}
-          icon={() => <Ionicons name="paper-plane" size={16} color={palette.onPrimary} />}
-        >
-          Send request
-        </Button>
+        />
       );
     }
 
     if (status === 'pending_sent') {
-      return (
-        <Button
-          mode="outlined"
-          disabled
-          style={styles.button}
-          contentStyle={styles.buttonContent}
-          labelStyle={styles.buttonLabel}
-          icon={() => <Ionicons name="time-outline" size={16} color={palette.textMuted} />}
-        >
-          Waiting for a reply
-        </Button>
-      );
+      return <Button label="Waiting for a reply" icon="time-outline" variant="secondary" size="md" disabled />;
     }
 
     if (status === 'pending_received') {
       return (
         <View>
           <View style={styles.notice}>
-            <Ionicons name="notifications-outline" size={16} color={palette.primaryDark} />
-            <Text style={styles.noticeText}>
-              {user.full_name} asked to share a ride with you
-            </Text>
+            <Ionicons name="notifications-outline" size={16} color={palette.ink} />
+            <Text style={[type.label, styles.noticeText]}>{user.full_name} asked to share a trip with you</Text>
           </View>
           <View style={styles.buttonRow}>
             <Button
-              mode="contained"
-              onPress={handleApprove}
+              label="Accept"
+              icon="checkmark"
+              variant="dark"
+              size="md"
+              onPress={() => user.connection_id && run(() => onApprove(user.connection_id as number))}
               loading={loading}
-              disabled={loading}
-              style={[styles.button, styles.rowButton]}
-              contentStyle={styles.buttonContent}
-              labelStyle={styles.buttonLabel}
-              icon={() => <Ionicons name="checkmark" size={16} color={palette.onPrimary} />}
-            >
-              Accept
-            </Button>
+              style={styles.rowButton}
+            />
             <Button
-              mode="outlined"
-              onPress={handleReject}
-              loading={loading}
+              label="Decline"
+              variant="outline"
+              size="md"
+              onPress={() => user.connection_id && run(() => onReject(user.connection_id as number))}
               disabled={loading}
-              textColor={palette.danger}
-              style={[styles.button, styles.rowButton, styles.dangerOutline]}
-              contentStyle={styles.buttonContent}
-              labelStyle={styles.buttonLabel}
-              icon={() => <Ionicons name="close" size={16} color={palette.danger} />}
-            >
-              Decline
-            </Button>
+              style={styles.rowButton}
+            />
           </View>
         </View>
       );
@@ -137,7 +90,7 @@ export default function MatchedUserCard({ user, onSendRequest, onApprove, onReje
       return (
         <View style={styles.approvedRow}>
           <Ionicons name="checkmark-circle" size={18} color={palette.success} />
-          <Text style={styles.approvedText}>You both agreed to share this ride.</Text>
+          <Text style={[type.label, styles.approvedText]}>You both agreed to share this trip.</Text>
         </View>
       );
     }
@@ -150,16 +103,16 @@ export default function MatchedUserCard({ user, onSendRequest, onApprove, onReje
       <View style={styles.header}>
         <Avatar name={user.full_name} size={48} />
         <View style={styles.headerText}>
-          <Text style={styles.name} numberOfLines={1}>
+          <Text style={type.title3} numberOfLines={1}>
             {user.full_name}
           </Text>
           {user.year_of_study ? (
-            <Text style={styles.meta} numberOfLines={1}>
+            <Text style={[type.label, styles.meta]} numberOfLines={1}>
               {user.year_of_study}
             </Text>
           ) : null}
         </View>
-        {pill ? <StatusPill label={pill.label} tone={pill.tone} /> : null}
+        {tag ? <Tag label={tag.label} tone={tag.tone} /> : null}
       </View>
       <View style={styles.actions}>{renderActions()}</View>
     </Card>
@@ -178,37 +131,18 @@ const styles = StyleSheet.create({
     flex: 1,
     marginHorizontal: space.sm,
   },
-  name: {
-    fontSize: 16,
-    fontWeight: font.semibold,
-    color: palette.text,
-  },
   meta: {
     marginTop: 2,
-    fontSize: 13,
     color: palette.textMuted,
   },
   actions: {
     marginTop: space.md,
   },
-  button: {
-    borderRadius: radius.md,
-  },
-  buttonContent: {
-    height: 44,
-  },
-  buttonLabel: {
-    fontSize: 14,
-    fontWeight: font.semibold,
-  },
-  dangerOutline: {
-    borderColor: palette.danger,
-  },
   notice: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
-    backgroundColor: palette.primarySoft,
+    backgroundColor: palette.yellowTint,
     paddingHorizontal: space.sm,
     paddingVertical: space.sm,
     borderRadius: radius.sm,
@@ -216,9 +150,7 @@ const styles = StyleSheet.create({
   },
   noticeText: {
     flex: 1,
-    fontSize: 13,
-    fontWeight: font.medium,
-    color: palette.primaryDark,
+    color: palette.ink,
   },
   buttonRow: {
     flexDirection: 'row',
@@ -238,8 +170,6 @@ const styles = StyleSheet.create({
   },
   approvedText: {
     flex: 1,
-    fontSize: 14,
-    fontWeight: font.medium,
     color: palette.success,
   },
 });

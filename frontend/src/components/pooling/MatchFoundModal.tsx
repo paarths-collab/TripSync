@@ -1,11 +1,13 @@
 // src/components/pooling/MatchFoundModal.tsx
-import React, { useCallback } from 'react';
-import { View, StyleSheet, FlatList } from 'react-native';
-import { Text, Button, Portal, Modal } from 'react-native-paper';
+import React from 'react';
+import { FlatList, StyleSheet, View } from 'react-native';
+import { Modal, Portal, Text } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { MatchedUser } from '../../services/poolingService';
 import MatchedUserCard from './MatchedUserCard';
-import { EmptyState, IconButton, StatusPill } from '../ui';
-import { palette, space, radius, font, shadow } from '../../constants/theme';
+import { Button, EmptyState, IconButton, Tag } from '../ui';
+import { palette, radius, shadow, space, type } from '../../constants/theme';
 
 interface MatchFoundModalProps {
   visible: boolean;
@@ -24,42 +26,40 @@ export default function MatchFoundModal({
   onApprove,
   onReject,
 }: MatchFoundModalProps) {
+  const insets = useSafeAreaInsets();
   const hasMatches = matches.length > 0;
   const title = hasMatches
-    ? `${matches.length} ${matches.length === 1 ? 'person' : 'people'} heading your way`
+    ? `${matches.length} ${matches.length === 1 ? 'student' : 'students'} going your way`
     : 'No one found yet';
-
-  const handleClose = useCallback(() => {
-    console.log('MatchFoundModal - Close button pressed');
-    onNewSearch();
-  }, [onNewSearch]);
 
   return (
     <Portal>
       <Modal
         visible={visible}
-        onDismiss={handleClose}
-        dismissable={true}
+        onDismiss={onNewSearch}
+        dismissable
         style={styles.modalWrapper}
-        contentContainerStyle={styles.sheet}
+        contentContainerStyle={[styles.sheet, { paddingBottom: insets.bottom + space.md }]}
       >
         <View style={styles.handle} />
 
         <View style={styles.header}>
           <View style={styles.headerText}>
-            <StatusPill
-              label={hasMatches ? 'Matched' : 'No matches'}
-              tone={hasMatches ? 'success' : 'neutral'}
+            <Tag
+              label={hasMatches ? 'Matches' : 'No matches'}
+              tone={hasMatches ? 'brand' : 'neutral'}
               icon={hasMatches ? 'people' : 'search'}
             />
-            <Text style={styles.title}>{title}</Text>
+            <Text style={[type.title2, styles.title]} accessibilityRole="header">
+              {title}
+            </Text>
             {hasMatches ? (
-              <Text style={styles.subtitle}>
-                Send a request to agree on sharing a taxi. You book and pay for it together.
+              <Text style={[type.label, styles.subtitle]}>
+                Send a request to agree on sharing the trip. You arrange and pay for travel together.
               </Text>
             ) : null}
           </View>
-          <IconButton icon="close" label="Close and start over" onPress={handleClose} size={36} />
+          <IconButton icon="close" label="Close and start over" onPress={onNewSearch} size={40} round />
         </View>
 
         {hasMatches ? (
@@ -67,12 +67,7 @@ export default function MatchFoundModal({
             data={matches}
             keyExtractor={(item) => item.id.toString()}
             renderItem={({ item }) => (
-              <MatchedUserCard
-                user={item}
-                onSendRequest={onSendRequest}
-                onApprove={onApprove}
-                onReject={onReject}
-              />
+              <MatchedUserCard user={item} onSendRequest={onSendRequest} onApprove={onApprove} onReject={onReject} />
             )}
             contentContainerStyle={styles.listContent}
             style={styles.list}
@@ -82,21 +77,13 @@ export default function MatchFoundModal({
           <EmptyState
             icon="people-outline"
             title="No students on this route right now"
-            body="Try searching again in a few minutes."
+            body="Try again in a few minutes. New requests appear as students search."
             style={styles.empty}
           />
         )}
 
         <View style={styles.footer}>
-          <Button
-            mode="outlined"
-            onPress={onNewSearch}
-            style={styles.button}
-            contentStyle={styles.buttonContent}
-            labelStyle={styles.buttonLabel}
-          >
-            Start a new search
-          </Button>
+          <Button label="Start a new search" variant="outline" size="md" onPress={onNewSearch} />
         </View>
       </Modal>
     </Portal>
@@ -106,22 +93,22 @@ export default function MatchFoundModal({
 const styles = StyleSheet.create({
   modalWrapper: {
     justifyContent: 'flex-end',
+    marginBottom: 0, // sheet runs to the bottom edge; content pads for the safe area
   },
   sheet: {
-    maxHeight: '85%',
+    maxHeight: '88%',
     backgroundColor: palette.background,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    paddingBottom: space.xl,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    paddingTop: space.xs,
     ...shadow.raised,
   },
   handle: {
     alignSelf: 'center',
     width: 40,
-    height: 4,
-    borderRadius: radius.pill,
+    height: 5,
+    borderRadius: 3,
     backgroundColor: palette.border,
-    marginTop: space.xs,
   },
   header: {
     flexDirection: 'row',
@@ -136,15 +123,9 @@ const styles = StyleSheet.create({
   },
   title: {
     marginTop: space.xs,
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: font.bold,
-    color: palette.text,
   },
   subtitle: {
     marginTop: space.xxs,
-    fontSize: 14,
-    lineHeight: 20,
     color: palette.textMuted,
   },
   list: {
@@ -160,15 +141,5 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: space.lg,
     paddingTop: space.sm,
-  },
-  button: {
-    borderRadius: radius.md,
-  },
-  buttonContent: {
-    height: 48,
-  },
-  buttonLabel: {
-    fontSize: 15,
-    fontWeight: font.semibold,
   },
 });

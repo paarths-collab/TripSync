@@ -1,8 +1,12 @@
 // src/app/(main)/home.tsx
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+// Rides tab: choose a pickup and destination, then find students going the
+// same way. This file holds state and logic only; every visual piece lives in
+// components/pooling, so the screen can be tested with a minimal
+// react-native stub (see tests/poolingScreen.test.cjs).
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
-import { WebView } from 'react-native-webview';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import type { LocationObject } from 'expo-location';
 
 // --- Local Hooks & Context ---
 import { useLocation } from '../../hooks/useLocation';
@@ -12,10 +16,12 @@ import { usePoolingRecovery } from '../../hooks/usePoolingRecovery';
 
 // --- API Service Functions & Types ---
 import {
-  getAddressFromCoords,
   getPlaceDetails,
-  AutocompleteSuggestion,
-  PlaceDetails
+  reverseGeocode,
+  shortPlaceLabel,
+  toPlacesError,
+  type PlaceDetails,
+  type PlaceSuggestion,
 } from '../../services/locationService';
 import {
   getRouteDetails,
@@ -31,9 +37,12 @@ import {
 
 // --- UI Components ---
 import OlaMapWebView from '../../components/pooling/OlaMapWebView';
+import type { MapPoint, OlaMapHandle } from '../../components/pooling/OlaMapWebView';
 import MapInterface from '../../components/pooling/MapInterface';
 import LocationSearchModal from '../../components/pooling/LocationSearchModal';
 import RouteConfirmationCard from '../../components/pooling/RouteConfirmationCard';
+import type { PickupState, RouteState } from '../../components/pooling/RouteConfirmationCard';
+import PickupAdjustSheet from '../../components/pooling/PickupAdjustSheet';
 import SearchingOverlay from '../../components/pooling/SearchingOverlay';
 import MatchFoundModal from '../../components/pooling/MatchFoundModal';
 import ActiveRideView from '../../components/pooling/ActiveRideView';
@@ -42,25 +51,73 @@ import ActiveConnectionModal from '../../components/pooling/ActiveConnectionModa
 type ScreenState = 'idle' | 'confirming_route' | 'searching' | 'results' | 'connection_modal' | 'active_ride';
 type MapPitch = 60 | 0;
 
+/** The pickup is explicit: GPS by default, or a spot the user confirmed on the map. */
+interface PickupPoint extends MapPoint {
+  label: string | null; // null while the address is being looked up
+  source: 'gps' | 'manual';
+}
+
+// A GPS pickup follows the user only while no trip is being planned, and only
+// after a meaningful move (keeps reverse-geocode calls low).
+const PICKUP_REFRESH_METERS = 75;
+const DRAFT_GEOCODE_DELAY_MS = 450;
+
+const toPoint = (location: LocationObject | null | undefined): MapPoint | null =>
+  location ? { lat: location.coords.latitude, lng: location.coords.longitude } : null;
+
+function distanceMeters(a: MapPoint, b: MapPoint): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
 export default function PoolingScreen() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const router = useRouter();
-  const { location: liveLocation, getUserLocation } = useLocation();
+
+  // GPS is watched (Balanced accuracy) only while this tab is focused.
+  const [isFocused, setIsFocused] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, []),
+  );
+  const { location: liveLocation, errorMsg: locationError, getUserLocation } = useLocation({ watch: isFocused });
   const { match, connectionUpdate, connect, disconnect, clearMatch } = usePoolingSocket(token);
 
   const [isSearchModalVisible, setIsSearchModalVisible] = useState(false);
   const [screenState, setScreenState] = useState<ScreenState>('idle');
-  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number } | null>(null);
-  const [pickupLocationName, setPickupLocationName] = useState('Setting pickup location...');
   const [selectedDestination, setSelectedDestination] = useState<PlaceDetails | null>(null);
   const [routeDetails, setRouteDetails] = useState<RouteDetails | null>(null);
+  const [routeStatus, setRouteStatus] = useState<Exclude<RouteState, 'idle'>>('loading');
   const [matches, setMatches] = useState<MatchedUser[]>([]);
-  const [mapPitch, setMapPitch] = useState<MapPitch>(60);
+  const [mapPitch, setMapPitch] = useState<MapPitch>(0);
   const [activeConnection, setActiveConnection] = useState<ActiveConnection | null>(null);
   const [currentRequestId, setCurrentRequestId] = useState<number | null>(null);
 
-  const webViewRef = useRef<WebView>(null);
-  const isMapReady = useRef(false);
+  // Pickup and the "Adjust pickup" mode
+  const [pickup, setPickup] = useState<PickupPoint | null>(null);
+  const [isAdjustingPickup, setIsAdjustingPickup] = useState(false);
+  const [pickupDraft, setPickupDraft] = useState<MapPoint | null>(null);
+  const [draftLabel, setDraftLabel] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+
+  // Destination search
+  const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
+  const [placeError, setPlaceError] = useState<string | null>(null);
+
+  // Map
+  const mapRef = useRef<OlaMapHandle>(null);
+  const lastMapCenter = useRef<MapPoint | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [topInset, setTopInset] = useState(0);
+  const [bottomInset, setBottomInset] = useState(0);
+  const mapInsets = useMemo(() => ({ top: topInset, bottom: bottomInset }), [topInset, bottomInset]);
+
+  const livePoint = useMemo(() => toPoint(liveLocation), [liveLocation]);
 
   const applyRecoveredState = (result: CurrentPoolingState) => {
     if (result.connection) {
@@ -79,7 +136,6 @@ export default function PoolingScreen() {
       setScreenState('idle');
       clearMatch();
       disconnect();
-      webViewRef.current?.injectJavaScript('window.clearRoute(); window.clearDestinationMarker(); true;');
     }
   };
   const { invalidate: invalidateRecovery, runAction: withPoolingMutation } = usePoolingRecovery(token, applyRecoveredState);
@@ -94,29 +150,23 @@ export default function PoolingScreen() {
     const { type, data } = connectionUpdate;
 
     if (type === 'request_sent') {
-      console.log('Request sent successfully:', data);
       // Update the match to show pending_sent status
-      setMatches(prevMatches => {
-        const updated = prevMatches.map(m => 
+      setMatches(prevMatches =>
+        prevMatches.map(m =>
           m.id === data.to_user?.id
             ? { ...m, connection_status: 'pending_sent' as const, connection_id: data.connection_id }
             : m
-        );
-        console.log('Updated matches after request sent:', updated);
-        return updated;
-      });
+        )
+      );
     } else if (type === 'request_received') {
-      console.log('Connection request received:', data);
       // Refresh matches to show the pending request
-      setMatches(prevMatches => {
-        const updated = prevMatches.map(m => 
+      setMatches(prevMatches =>
+        prevMatches.map(m =>
           m.id === data.from_user?.id
             ? { ...m, connection_status: 'pending_received' as const, connection_id: data.connection_id }
             : m
-        );
-        console.log('Updated matches after request received:', updated);
-        return updated;
-      });
+        )
+      );
     } else if (type === 'approved') {
       // Connection approved, convert partner data to ActiveConnection
       if (data.partner) {
@@ -164,206 +214,271 @@ export default function PoolingScreen() {
       setRouteDetails(null);
       clearMatch();
       disconnect();
-      webViewRef.current?.injectJavaScript('window.clearRoute(); window.clearDestinationMarker(); true;');
     }
   }, [connectionUpdate, currentRequestId, activeConnection, invalidateRecovery, clearMatch, disconnect]);
 
-  // --- Map and Location Logic ---
+  // --- Pickup ---
 
-  const handleMapReady = useCallback(() => {
-    isMapReady.current = true;
-    (async () => {
-      const userLocation = await getUserLocation();
-      if (userLocation) {
-        const coords = { lat: userLocation.coords.latitude, lng: userLocation.coords.longitude };
-        flyTo(coords);
-      } else {
-        Alert.alert("Location Error", "Could not get your location. Please enable location services.");
-      }
-    })();
-  }, [getUserLocation]);
+  // Default pickup = current location. Once a destination is chosen (or the
+  // user pinned a spot) the pickup only changes when they confirm a new one.
+  useEffect(() => {
+    if (!livePoint || isAdjustingPickup) return;
+    setPickup(current => {
+      if (current?.source === 'manual') return current;
+      if (current && (selectedDestination || screenState !== 'idle')) return current;
+      if (current && distanceMeters(current, livePoint) < PICKUP_REFRESH_METERS) return current;
+      return { lat: livePoint.lat, lng: livePoint.lng, label: null, source: 'gps' };
+    });
+  }, [livePoint, isAdjustingPickup, selectedDestination, screenState]);
 
-  const flyTo = (coords: { lat: number; lng: number }) => {
-    if (isMapReady.current && webViewRef.current) {
-      webViewRef.current.injectJavaScript(`window.flyTo({ lat: ${coords.lat}, lng: ${coords.lng} }); true;`);
-    }
-  };
+  // Look up a readable label for the pickup.
+  useEffect(() => {
+    if (!pickup || pickup.label !== null) return;
+    let cancelled = false;
+    const target = { lat: pickup.lat, lng: pickup.lng };
+    const fallback = pickup.source === 'manual' ? 'Pinned location' : 'Current location';
+    const sameTarget = (p: PickupPoint | null): p is PickupPoint =>
+      !!p && p.lat === target.lat && p.lng === target.lng && p.label === null;
+    reverseGeocode(target, { token })
+      .then(result => {
+        if (!cancelled) setPickup(current => (sameTarget(current) ? { ...current, label: shortPlaceLabel(result) } : current));
+      })
+      .catch(() => {
+        if (!cancelled) setPickup(current => (sameTarget(current) ? { ...current, label: fallback } : current));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pickup, token]);
 
-  const handleRecenter = () => {
-    if (liveLocation) {
-      flyTo({ lat: liveLocation.coords.latitude, lng: liveLocation.coords.longitude });
-    } else {
-        Alert.alert("Can't Recenter", "Your current location is not available yet.");
-    }
-  };
+  const pickupPoint = useMemo<MapPoint | null>(
+    () => (pickup ? { lat: pickup.lat, lng: pickup.lng } : null),
+    [pickup?.lat, pickup?.lng], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const planning = screenState === 'idle' || screenState === 'confirming_route';
+  const adjusting = planning && isAdjustingPickup;
+  const canAdjustPickup = planning && mapReady;
 
-  const toggleMapPitch = () => {
-    const newPitch = mapPitch === 60 ? 0 : 60;
-    setMapPitch(newPitch);
-    if (isMapReady.current && webViewRef.current) {
-        webViewRef.current.injectJavaScript(`window.setMapPitch(${newPitch}); true;`);
-    }
-  };
-
-  const handleMapCenterChange = useCallback((coords: { lat: number; lng: number }) => {
-    setMapCenter(coords);
-  }, []);
+  // Panning the map never moves the pickup, except in "Adjust pickup" mode
+  // where the centre pin chooses a draft that must be confirmed.
+  const handleMapCenterChange = useCallback(
+    (center: MapPoint) => {
+      lastMapCenter.current = center;
+      if (!isAdjustingPickup) return;
+      setPickupDraft(center);
+      setDraftLabel(null);
+      setDraftError(null);
+    },
+    [isAdjustingPickup],
+  );
 
   useEffect(() => {
-    const debounceTimeout = setTimeout(async () => {
-      if (mapCenter && screenState === 'idle') {
-        const address = await getAddressFromCoords({ latitude: mapCenter.lat, longitude: mapCenter.lng });
-        setPickupLocationName(address);
+    if (!isAdjustingPickup || !pickupDraft) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      reverseGeocode(pickupDraft, { token })
+        .then(result => {
+          if (cancelled) return;
+          setDraftLabel(shortPlaceLabel(result));
+          setDraftError(null);
+        })
+        .catch(error => {
+          if (cancelled) return;
+          const placesError = toPlacesError(error);
+          setDraftLabel(null);
+          setDraftError(
+            placesError.code === 'rate_limited' || placesError.code === 'network'
+              ? placesError.message
+              : "Couldn't find an address here, but you can still use this spot."
+          );
+        });
+    }, DRAFT_GEOCODE_DELAY_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isAdjustingPickup, pickupDraft, token]);
+
+  const startAdjustPickup = useCallback(() => {
+    if (!canAdjustPickup) return;
+    const start = pickupPoint ?? livePoint ?? lastMapCenter.current;
+    setIsSearchModalVisible(false);
+    setIsAdjustingPickup(true);
+    setPickupDraft(start);
+    setDraftLabel(start && pickupPoint === start ? pickup?.label ?? null : null);
+    setDraftError(null);
+    if (start) mapRef.current?.flyTo(start, { exact: true, zoom: 17 });
+  }, [canAdjustPickup, pickupPoint, livePoint, pickup?.label]);
+
+  const finishAdjustPickup = useCallback(() => {
+    setIsAdjustingPickup(false);
+    setPickupDraft(null);
+    setDraftLabel(null);
+    setDraftError(null);
+  }, []);
+
+  const confirmPickup = () => {
+    if (!pickupDraft) return;
+    setPickup({
+      lat: pickupDraft.lat,
+      lng: pickupDraft.lng,
+      label: draftLabel ?? (draftError ? 'Pinned location' : null),
+      source: 'manual',
+    });
+    finishAdjustPickup();
+  };
+
+  const cancelAdjustPickup = () => {
+    finishAdjustPickup();
+    mapRef.current?.fitTrip();
+  };
+
+  const pickCurrentLocation = async () => {
+    const point = livePoint ?? toPoint(await getUserLocation());
+    if (!point) {
+      Alert.alert('Location unavailable', locationError || 'Turn on location services, or place the pin on the map.');
+      return;
+    }
+    setPickup({ lat: point.lat, lng: point.lng, label: null, source: 'gps' });
+    finishAdjustPickup();
+    if (!selectedDestination) mapRef.current?.flyTo(point);
+  };
+
+  // --- Map controls ---
+
+  const handleLocate = async () => {
+    const point = livePoint ?? toPoint(await getUserLocation());
+    if (!point) {
+      Alert.alert('Location unavailable', locationError || 'Your current location is not available yet.');
+      return;
+    }
+    mapRef.current?.flyTo(point, { exact: adjusting });
+  };
+
+  const toggleMapPitch = () => setMapPitch(pitch => (pitch === 60 ? 0 : 60));
+
+  // --- Route preview (pickup -> destination) ---
+
+  const routeQuery = useMemo(
+    () =>
+      pickupPoint && selectedDestination
+        ? {
+            start_lat: pickupPoint.lat,
+            start_lng: pickupPoint.lng,
+            end_lat: selectedDestination.lat,
+            end_lng: selectedDestination.lng,
+          }
+        : null,
+    [pickupPoint, selectedDestination],
+  );
+
+  useEffect(() => {
+    if (!routeQuery || !token) return;
+    let cancelled = false;
+    setRouteStatus('loading');
+    setRouteDetails(null);
+    getRouteDetails(token, routeQuery).then(result => {
+      if (cancelled) return; // destination or pickup changed meanwhile
+      if (result.success && result.route) {
+        setRouteDetails(result.route);
+        setRouteStatus('ready');
+      } else {
+        setRouteDetails(null);
+        setRouteStatus('unavailable');
       }
-    }, 500);
-    return () => clearTimeout(debounceTimeout);
-  }, [mapCenter, screenState]);
-  
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [routeQuery, token]);
+
   // --- Ride Logic ---
 
-  const handlePlaceSelected = async (place: AutocompleteSuggestion) => {
-    console.log('Place selected:', place);
-    
-    try {
-      const details = await getPlaceDetails(place.place_id);
-      console.log('Place details received:', details);
-      
-      if (!details) {
-          console.error('Place details is null');
-          Alert.alert("Error", "Could not get details for the selected location.");
-          return;
-      }
-      
-      if (!details.geometry || !details.geometry.location) {
-          console.error('Missing geometry in place details:', details);
-          Alert.alert("Error", "Invalid location data received.");
-          return;
-      }
-      
-      if (!mapCenter) {
-          console.error('Map center is not set');
-          Alert.alert("Error", "Please wait for the map to load your location.");
-          return;
-      }
-      
-      if (!token) {
-          console.error('Token is missing');
-          Alert.alert("Error", "Authentication error. Please log in again.");
-          return;
-      }
-
-      // Only close the modal after we've confirmed the details are valid
-      setIsSearchModalVisible(false);
-      
-      setSelectedDestination(details);
-      const destinationCoords = details.geometry.location;
-      
-      // Fetch route details now that the Directions API is fixed
-      console.log('Fetching route details...');
-      const routeResult = await getRouteDetails(token, {
-        start_lat: mapCenter.lat,
-        start_lng: mapCenter.lng,
-        end_lat: destinationCoords.lat,
-        end_lng: destinationCoords.lng,
-      });
-      
-      if (routeResult.success && routeResult.route) {
-        console.log('Route details received:', routeResult.route);
-        setRouteDetails(routeResult.route);
-        // Draw route on map
-        webViewRef.current?.injectJavaScript(
-          `window.drawRoute(${JSON.stringify(routeResult.route.polyline)}); true;`
-        );
-      } else {
-        console.warn('Route fetch failed:', routeResult.error);
-        setRouteDetails(null);
-      }
-      
-      // Add destination marker and move to confirmation screen
-      console.log('Adding destination marker and changing screen state...');
-      webViewRef.current?.injectJavaScript(`window.addOrUpdateDestinationMarker({lat: ${destinationCoords.lat}, lng: ${destinationCoords.lng}}); true;`);
-      setScreenState('confirming_route');
-      console.log('Screen state set to confirming_route');
-    } catch (error: any) {
-      console.error('Error in handlePlaceSelected:', error);
-      Alert.alert("Error", error.message || "Failed to process location selection");
+  const handlePlaceSelected = async (place: PlaceSuggestion) => {
+    if (!token) {
+      setPlaceError('Your session has expired. Please sign in again.');
+      return;
     }
+    setResolvingPlaceId(place.place_id);
+    setPlaceError(null);
+    try {
+      const details = await getPlaceDetails(place.place_id, { token });
+      // Only close the sheet once we have usable coordinates.
+      setIsSearchModalVisible(false);
+      setSelectedDestination(details);
+      setScreenState('confirming_route');
+    } catch (error) {
+      setPlaceError(toPlacesError(error).message);
+    } finally {
+      setResolvingPlaceId(null);
+    }
+  };
+
+  const openSearch = () => {
+    setPlaceError(null);
+    setIsSearchModalVisible(true);
   };
 
   const handleConfirmAndFindMatches = async () => {
-    if (!mapCenter || !selectedDestination || !token) {
-        Alert.alert('Error', 'Missing trip details. Please start over.');
-        return;
+    if (!pickup || !selectedDestination || !token) {
+      Alert.alert('Missing trip details', 'Set your pickup and destination first.');
+      return;
     }
     setScreenState('searching');
     connect();
 
     try {
-        const destCoords = selectedDestination.geometry.location;
-        await withPoolingMutation(async () => {
-          const response = await createRequestAndFindMatches(token, {
-              start_latitude: mapCenter.lat,
-              start_longitude: mapCenter.lng,
-              destination_latitude: destCoords.lat,
-              destination_longitude: destCoords.lng,
-              destination_name: selectedDestination.name,
-          });
-          setCurrentRequestId(response.request_id);
-          if (response.matches.length > 0) {
-              setMatches(response.matches);
-              setScreenState('results');
-          }
+      await withPoolingMutation(async () => {
+        const response = await createRequestAndFindMatches(token, {
+          start_latitude: pickup.lat,
+          start_longitude: pickup.lng,
+          destination_latitude: selectedDestination.lat,
+          destination_longitude: selectedDestination.lng,
+          destination_name: selectedDestination.name,
         });
+        setCurrentRequestId(response.request_id);
+        if (response.matches.length > 0) {
+          setMatches(response.matches);
+          setScreenState('results');
+        }
+      });
     } catch (error: any) {
-        Alert.alert('Search Failed', error.message);
-        setScreenState('confirming_route');
-        disconnect();
+      Alert.alert('Search failed', error.message);
+      setScreenState('confirming_route');
+      disconnect();
     }
   };
-  
+
   const handleNewSearch = async () => withPoolingMutation(async () => {
-    console.log('handleNewSearch called - resetting to idle state');
-    
     // Disconnect WebSocket when starting new search
     disconnect();
-    
+
     // Clear the match state first to prevent useEffect from re-triggering
     clearMatch();
-    
+
     // Cancel the active request on the backend if it exists
     if (token && currentRequestId) {
       try {
         await cancelPoolingRequest(token, currentRequestId);
-        console.log('Pooling request cancelled on backend');
-      } catch (error: any) {
-        console.error('Failed to cancel pooling request:', error.message);
+      } catch {
+        console.warn('Could not cancel the pooling request');
       }
     }
-    
+
     setScreenState('idle');
     setSelectedDestination(null);
     setRouteDetails(null);
     setMatches([]);
     setCurrentRequestId(null);
     setActiveConnection(null);
-    if (isMapReady.current && webViewRef.current) {
-        webViewRef.current.injectJavaScript('window.clearRoute(); true;');
-        webViewRef.current.injectJavaScript('window.clearDestinationMarker(); true;');
-    }
   });
 
   // --- Connection Management ---
-  
+
   const handleSendRequest = async (targetRequestId: number) => {
-    console.log('handleSendRequest called for request ID:', targetRequestId);
-    if (!token) {
-      console.error('No token available');
-      return;
-    }
+    if (!token) return;
     try {
-      console.log('Sending connection request...');
       await sendConnectionRequest(token, targetRequestId);
-      console.log('Connection request sent successfully');
       // Update local state
       setMatches(prevMatches =>
         prevMatches.map(m =>
@@ -373,8 +488,7 @@ export default function PoolingScreen() {
         )
       );
     } catch (error: any) {
-      console.error('Error sending request:', error);
-      Alert.alert('Error', error.message);
+      Alert.alert('Could not send request', error.message);
     }
   };
 
@@ -384,7 +498,7 @@ export default function PoolingScreen() {
       await withPoolingMutation(() => respondToConnection(token, connectionId, 'approve'));
       // Socket delivery accelerates the REST reconciliation after this action.
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Could not accept', error.message);
     }
   };
 
@@ -400,15 +514,12 @@ export default function PoolingScreen() {
         )
       );
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      Alert.alert('Could not decline', error.message);
     }
   };
 
   const handleEndRide = async () => withPoolingMutation(async () => {
-    console.log('handleEndRide called - token:', !!token, 'currentRequestId:', currentRequestId);
-    
     if (!token || !currentRequestId) {
-      console.warn('Cannot end ride: missing token or requestId', { hasToken: !!token, requestId: currentRequestId });
       // Reset state anyway to unblock UI
       setActiveConnection(null);
       setScreenState('idle');
@@ -418,36 +529,28 @@ export default function PoolingScreen() {
       setCurrentRequestId(null);
       return;
     }
-    
+
     try {
-      console.log('Calling cancelPoolingRequest with requestId:', currentRequestId);
       await cancelPoolingRequest(token, currentRequestId);
-      console.log('Successfully cancelled pooling request');
     } catch (error: any) {
-      console.error('Error ending ride:', error);
-      Alert.alert('Error', error.message);
+      Alert.alert('Could not end the match', error.message);
     } finally {
       // Always reset state regardless of API success/failure
-      console.log('Resetting state after end ride');
       setActiveConnection(null);
       setScreenState('idle');
       setSelectedDestination(null);
       setRouteDetails(null);
       setMatches([]);
       setCurrentRequestId(null);
-      if (isMapReady.current && webViewRef.current) {
-        webViewRef.current.injectJavaScript('window.clearRoute(); true;');
-        webViewRef.current.injectJavaScript('window.clearDestinationMarker(); true;');
-      }
     }
   });
 
   const handleStartChat = async () => {
     if (!activeConnection) return;
-    
+
     // Close the modal first
     setScreenState('active_ride');
-    
+
     // Navigate directly to chat screen - expo-router will handle tab switching
     router.push({
       pathname: '/(main)/chat',
@@ -461,9 +564,6 @@ export default function PoolingScreen() {
   const handleContinueToActiveRide = () => {
     setScreenState('active_ride');
   };
-
-  // Removed useFocusEffect that was causing stale closure issues
-  // The component doesn't need to reset on focus since we're staying on the same tab
 
   useEffect(() => {
     if (match) {
@@ -480,7 +580,7 @@ export default function PoolingScreen() {
   }, [match]);
 
   // --- RENDER ---
-  
+
   // Show ActiveRideView when there's an active connection
   if (screenState === 'active_ride' && activeConnection) {
     return (
@@ -492,49 +592,98 @@ export default function PoolingScreen() {
     );
   }
 
+  const pickupState: PickupState = pickup ? 'ready' : locationError ? 'unavailable' : 'locating';
+  const pickupLabel = pickup
+    ? pickup.label || (pickup.source === 'manual' ? 'Pinned location' : 'Current location')
+    : locationError
+      ? 'Location unavailable'
+      : 'Finding your location…';
+  const routeState: RouteState = selectedDestination && pickup ? routeStatus : 'idle';
+  const destinationPoint = selectedDestination ? { lat: selectedDestination.lat, lng: selectedDestination.lng } : null;
+
   return (
     <View style={styles.container}>
       <OlaMapWebView
-        ref={webViewRef}
-        onMapReady={handleMapReady}
-        onMapCenterChange={handleMapCenterChange}
+        ref={mapRef}
+        pickup={pickupPoint}
+        showPickup={!adjusting}
+        userLocation={adjusting || pickup?.source === 'manual' ? livePoint : null}
+        destination={destinationPoint}
+        route={selectedDestination && routeDetails ? routeDetails.polyline : null}
+        insets={mapInsets}
+        pitch={mapPitch}
+        onCenterChange={handleMapCenterChange}
+        onReadyChange={setMapReady}
       />
 
-      {(screenState === 'idle' || screenState === 'confirming_route') && (
+      {planning && (
         <MapInterface
-          pickupLocationName={pickupLocationName}
-          destinationName={selectedDestination?.name}
-          onWhereToPress={() => setIsSearchModalVisible(true)}
-          onRecenterPress={handleRecenter}
-          onTogglePitch={toggleMapPitch}
+          userName={user?.full_name}
+          hasDestination={!!selectedDestination}
+          adjustingPickup={adjusting}
+          mapAvailable={mapReady}
           mapPitch={mapPitch}
+          onSearchPress={openSearch}
+          onLocatePress={handleLocate}
+          onTogglePitch={toggleMapPitch}
+          onCancelAdjust={cancelAdjustPickup}
+          onAvatarPress={() => router.push('/(main)/profile')}
+          onTopInsetChange={setTopInset}
         />
       )}
-      
+
+      {planning && !adjusting && (
+        <RouteConfirmationCard
+          pickupLabel={pickupLabel}
+          pickupSource={pickup?.source ?? null}
+          pickupState={pickupState}
+          canAdjustPickup={canAdjustPickup}
+          onAdjustPickup={startAdjustPickup}
+          destinationName={selectedDestination?.name ?? null}
+          destinationAddress={selectedDestination?.address ?? null}
+          onDestinationPress={openSearch}
+          onClearDestination={handleNewSearch}
+          routeDetails={routeDetails}
+          routeState={routeState}
+          onConfirm={handleConfirmAndFindMatches}
+          confirmDisabled={!pickup || !selectedDestination || screenState !== 'confirming_route'}
+          onHeightChange={setBottomInset}
+        />
+      )}
+
+      {adjusting && (
+        <PickupAdjustSheet
+          draftLabel={draftLabel}
+          draftError={draftError}
+          canConfirm={!!pickupDraft}
+          canUseCurrentLocation={!!livePoint}
+          onConfirm={confirmPickup}
+          onUseCurrentLocation={pickCurrentLocation}
+          onHeightChange={setBottomInset}
+        />
+      )}
+
       <LocationSearchModal
         visible={isSearchModalVisible}
         onDismiss={() => setIsSearchModalVisible(false)}
-        pickupLocationName={pickupLocationName}
+        token={token}
+        pickupLabel={pickupLabel}
+        near={pickupPoint ?? livePoint}
+        onAdjustPickup={canAdjustPickup ? startAdjustPickup : undefined}
         onPlaceSelected={handlePlaceSelected}
+        resolvingPlaceId={resolvingPlaceId}
+        selectionError={placeError}
       />
-
-      {screenState === 'confirming_route' && selectedDestination && (
-        <RouteConfirmationCard
-          destinationName={selectedDestination.name}
-          routeDetails={routeDetails}
-          onConfirm={handleConfirmAndFindMatches}
-          onCancel={handleNewSearch}
-        />
-      )}
 
       <SearchingOverlay
         visible={screenState === 'searching'}
+        destinationName={selectedDestination?.name}
         onCancel={() => {
           disconnect();
           handleNewSearch();
         }}
       />
-      
+
       <MatchFoundModal
         visible={screenState === 'results'}
         matches={matches}
@@ -543,7 +692,7 @@ export default function PoolingScreen() {
         onApprove={handleApprove}
         onReject={handleReject}
       />
-      
+
       {activeConnection && (
         <ActiveConnectionModal
           visible={screenState === 'connection_modal'}
@@ -559,9 +708,7 @@ export default function PoolingScreen() {
 
 const styles = StyleSheet.create({
   container: {
+    // The tab scene already paints the app background; the map fills this view.
     flex: 1,
-    // Matches palette.background. Kept literal: the pooling screen test stubs
-    // react-native, so importing constants/theme here would break it.
-    backgroundColor: '#F6F5FB',
   },
 });

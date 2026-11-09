@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { MatchedUser } from '../services/poolingService';
-import { API_BASE_URL } from '../constants/config';
+import { WS_BASE_URL, joinUrl } from '../constants/config';
 import { Alert } from 'react-native';
 
 // Define the shape of messages we expect from the server
@@ -22,13 +22,16 @@ interface WebSocketMessage {
   created_at?: string;
 }
 
+/** ws(s)://host/api/ws/pool, built from WS_BASE_URL (EXPO_PUBLIC_WS_BASE_URL or derived from the API URL). */
+export const POOLING_SOCKET_URL = joinUrl(WS_BASE_URL, 'ws/pool');
+
 export function usePoolingSocket(token: string | null) {
   const [isConnected, setIsConnected] = useState(false);
   const [match, setMatch] = useState<MatchedUser | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connectionUpdate, setConnectionUpdate] = useState<{ type: string; data: any } | null>(null);
   const [chatMessage, setChatMessage] = useState<WebSocketMessage | null>(null);
-  
+
   // useRef is used to hold a reference to the WebSocket object itself.
   // This prevents it from being recreated on every component re-render.
   const socketRef = useRef<WebSocket | null>(null);
@@ -39,107 +42,94 @@ export function usePoolingSocket(token: string | null) {
       setError('Cannot connect without an authentication token.');
       return;
     }
-    if (socketRef.current) {
-      console.log('WebSocket already connected.');
-      return;
-    }
-
-    // Convert the http:// URL to a ws:// URL
-    const wsUrl = API_BASE_URL.replace(/^http/, 'ws').replace('/api', '/api/ws/pool');
-    console.log('Connecting to WebSocket:', wsUrl);
+    if (socketRef.current) return; // already connected
 
     // --- Create the WebSocket connection ---
     // We pass the token in the subprotocol array, as our backend expects.
-    const ws = new WebSocket(wsUrl, ['token', token]);
+    const ws = new WebSocket(POOLING_SOCKET_URL, ['token', token]);
     socketRef.current = ws;
 
     ws.onopen = () => {
       if (socketRef.current !== ws) return;
-      console.log('WebSocket connection opened.');
       setIsConnected(true);
       setError(null);
     };
 
     ws.onmessage = (event) => {
       if (socketRef.current !== ws) return;
-      console.log('Received message from server:', event.data);
+      // Never log payloads: they carry names, contact details and trip data.
+      let message: WebSocketMessage;
       try {
-        const message: WebSocketMessage = JSON.parse(event.data);
-        
-        switch (message.type) {
-          case 'match_found':
-            if (message.match) {
-              setMatch(message.match); // A match has been found!
-            }
-            break;
-            
-          case 'connection_request_sent':
-            // We sent a request successfully - update UI
-            console.log('Request sent notification:', message);
-            setConnectionUpdate({ type: 'request_sent', data: message });
-            break;
-            
-          case 'connection_request_received':
-            // Someone sent us a connection request
-            Alert.alert(
-              '🚗 Connection Request',
-              `${message.from_user?.full_name} wants to pool with you!`,
-              [{ text: 'View' }]
-            );
-            setConnectionUpdate({ type: 'request_received', data: message });
-            break;
-            
-          case 'connection_approved':
-            // Connection approved - both users get partner details
-            Alert.alert(
-              '✅ Connection Approved!',
-              `You are now connected with ${message.partner?.full_name}. You can start your ride!`,
-              [{ text: 'Great!' }]
-            );
-            setConnectionUpdate({ type: 'approved', data: message });
-            break;
-            
-          case 'connection_rejected':
-            // Our request was rejected
-            Alert.alert(
-              'Request Declined',
-              `${message.by_user?.full_name} declined your connection request.`,
-              [{ text: 'OK' }]
-            );
-            setConnectionUpdate({ type: 'rejected', data: message });
-            break;
-            
-          case 'ride_cancelled':
-            // Partner cancelled the ride
-            Alert.alert(
-              'Ride Cancelled',
-              message.message || 'Your pooling partner cancelled the ride.',
-              [{ text: 'OK' }]
-            );
-            setConnectionUpdate({ type: 'cancelled', data: message });
-            break;
-            
-          case 'chat_message':
-            // Received a chat message
-            console.log('Chat message received:', message);
-            setChatMessage(message);
-            break;
-        }
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e);
+        message = JSON.parse(event.data);
+      } catch {
+        console.warn('Ignored a malformed pooling socket message');
+        return;
+      }
+      if (!message || typeof message !== 'object' || typeof message.type !== 'string') return;
+
+      switch (message.type) {
+        case 'match_found':
+          if (message.match) {
+            setMatch(message.match); // A match has been found!
+          }
+          break;
+
+        case 'connection_request_sent':
+          setConnectionUpdate({ type: 'request_sent', data: message });
+          break;
+
+        case 'connection_request_received':
+          Alert.alert(
+            'New trip request',
+            `${message.from_user?.full_name || 'A student'} wants to share a trip with you.`,
+            [{ text: 'View' }]
+          );
+          setConnectionUpdate({ type: 'request_received', data: message });
+          break;
+
+        case 'connection_approved':
+          // Connection approved - both users get partner details
+          Alert.alert(
+            'Request accepted',
+            `You and ${message.partner?.full_name || 'your trip partner'} agreed to share a trip. Sort out the details in chat.`,
+            [{ text: 'OK' }]
+          );
+          setConnectionUpdate({ type: 'approved', data: message });
+          break;
+
+        case 'connection_rejected':
+          Alert.alert(
+            'Request declined',
+            `${message.by_user?.full_name || 'The other student'} declined your request.`,
+            [{ text: 'OK' }]
+          );
+          setConnectionUpdate({ type: 'rejected', data: message });
+          break;
+
+        case 'ride_cancelled':
+          Alert.alert(
+            'Trip match ended',
+            message.message || 'Your trip partner ended the match.',
+            [{ text: 'OK' }]
+          );
+          setConnectionUpdate({ type: 'cancelled', data: message });
+          break;
+
+        case 'chat_message':
+          setChatMessage(message);
+          break;
       }
     };
 
-    ws.onerror = (e) => {
+    ws.onerror = () => {
       if (socketRef.current !== ws) return;
-      console.error('WebSocket error:', e);
+      console.warn('Pooling socket error');
       setError('A connection error occurred.');
       setIsConnected(false);
     };
 
-    ws.onclose = (e) => {
+    ws.onclose = () => {
       if (socketRef.current !== ws) return;
-      console.log('WebSocket connection closed:', e.code, e.reason);
       setIsConnected(false);
       socketRef.current = null; // Clean up the ref
     };
@@ -163,7 +153,7 @@ export function usePoolingSocket(token: string | null) {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(message));
     } else {
-      console.error('WebSocket is not connected');
+      console.warn('Pooling socket is not connected');
     }
   }, []);
 
@@ -178,14 +168,14 @@ export function usePoolingSocket(token: string | null) {
     };
   }, [token, disconnect]);
 
-  return { 
-    isConnected, 
-    match, 
-    error, 
-    connectionUpdate, 
+  return {
+    isConnected,
+    match,
+    error,
+    connectionUpdate,
     chatMessage,
-    connect, 
-    disconnect, 
+    connect,
+    disconnect,
     clearMatch,
     sendWebSocketMessage
   };

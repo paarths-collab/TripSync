@@ -1,10 +1,12 @@
 // src/components/pooling/ActiveConnectionModal.tsx
 import React, { useState } from 'react';
-import { View, StyleSheet, Alert } from 'react-native';
-import { Text, Button, Portal, Modal } from 'react-native-paper';
+import { Alert, StyleSheet, View } from 'react-native';
+import { Modal, Portal, Text } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
-import { Avatar, IconBadge, StatusPill } from '../ui';
-import { palette, space, radius, font, shadow } from '../../constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { Avatar, Button, IconBadge, Tag } from '../ui';
+import { palette, radius, shadow, space, type } from '../../constants/theme';
 
 interface Partner {
   id: number;
@@ -28,30 +30,27 @@ export default function ActiveConnectionModal({
   partner,
   onStartChat,
   onEndRide,
-  onViewFullProfile
+  onViewFullProfile,
 }: ActiveConnectionModalProps) {
+  const insets = useSafeAreaInsets();
   const [endingRide, setEndingRide] = useState(false);
 
   const handleEndRide = () => {
-    Alert.alert(
-      'End this ride?',
-      'This cancels your ride agreement and disconnects you from your ride partner.',
-      [
-        { text: 'Keep ride', style: 'cancel' },
-        {
-          text: 'End ride',
-          style: 'destructive',
-          onPress: async () => {
-            setEndingRide(true);
-            try {
-              await onEndRide();
-            } finally {
-              setEndingRide(false);
-            }
-          },
+    Alert.alert('End this match?', 'This cancels your shared-trip match and lets your trip partner know.', [
+      { text: 'Keep match', style: 'cancel' },
+      {
+        text: 'End match',
+        style: 'destructive',
+        onPress: async () => {
+          setEndingRide(true);
+          try {
+            await onEndRide();
+          } finally {
+            setEndingRide(false);
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   return (
@@ -60,78 +59,50 @@ export default function ActiveConnectionModal({
         visible={visible}
         dismissable={false}
         style={styles.modalWrapper}
-        contentContainerStyle={styles.sheet}
+        contentContainerStyle={[styles.sheet, { paddingBottom: insets.bottom + space.lg }]}
       >
         <View style={styles.handle} />
 
         <View style={styles.header}>
-          <IconBadge icon="checkmark" tone="success" size={48} />
-          <Text style={styles.title}>You&apos;re matched</Text>
-          <Text style={styles.subtitle}>
-            You both agreed to share a taxi. Sort out the pickup point and fare in chat.
+          <IconBadge icon="checkmark" tone="success" size={52} />
+          <Text style={[type.title1, styles.title]} accessibilityRole="header">
+            You&apos;re matched
+          </Text>
+          <Text style={[type.body, styles.subtitle]}>
+            You both agreed to share a trip. Agree on the pickup point, time and how you&apos;ll split the fare in
+            chat.
           </Text>
         </View>
 
         <View style={styles.partnerRow}>
           <Avatar name={partner.full_name} size={52} />
           <View style={styles.partnerText}>
-            <Text style={styles.partnerName} numberOfLines={1}>
+            <Text style={type.title3} numberOfLines={1}>
               {partner.full_name}
             </Text>
             {partner.phone_number ? (
               <View style={styles.contactRow}>
                 <Ionicons name="call-outline" size={14} color={palette.textMuted} />
-                <Text style={styles.contactText}>{partner.phone_number}</Text>
+                <Text style={[type.label, styles.muted]}>{partner.phone_number}</Text>
               </View>
             ) : partner.year_of_study ? (
-              <Text style={styles.contactText}>{partner.year_of_study}</Text>
+              <Text style={[type.label, styles.muted]}>{partner.year_of_study}</Text>
             ) : null}
           </View>
-          <StatusPill label="Active" tone="success" />
+          <Tag label="Matched" tone="success" icon="checkmark-circle" />
         </View>
 
         <View style={styles.actions}>
+          <Button label="Open chat" icon="chatbubbles-outline" onPress={onStartChat} />
+          <Button label="View trip details" variant="secondary" size="md" onPress={onViewFullProfile} />
           <Button
-            mode="contained"
-            onPress={onStartChat}
-            style={styles.button}
-            contentStyle={styles.buttonContent}
-            labelStyle={styles.buttonLabel}
-            icon={() => <Ionicons name="chatbubbles-outline" size={18} color={palette.onPrimary} />}
-          >
-            Open chat
-          </Button>
-
-          <Button
-            mode="outlined"
-            onPress={onViewFullProfile}
-            style={styles.button}
-            contentStyle={styles.buttonContent}
-            labelStyle={styles.buttonLabel}
-          >
-            View ride details
-          </Button>
-
-          <Button
-            mode="text"
+            label="End match"
+            variant="ghost"
+            size="md"
             onPress={handleEndRide}
             loading={endingRide}
-            disabled={endingRide}
-            textColor={palette.danger}
-            style={styles.button}
-            labelStyle={styles.buttonLabel}
-          >
-            End ride
-          </Button>
-        </View>
-
-        <View style={styles.tips}>
-          <Text style={styles.tipsTitle}>Before you head out</Text>
-          <Text style={styles.tipsText}>
-            {'•'} Agree on an exact pickup point{'\n'}
-            {'•'} Confirm the time in chat{'\n'}
-            {'•'} Decide how you&apos;ll split the fare
-          </Text>
+            accessibilityLabel="End this trip match"
+          />
         </View>
       </Modal>
     </Portal>
@@ -141,22 +112,22 @@ export default function ActiveConnectionModal({
 const styles = StyleSheet.create({
   modalWrapper: {
     justifyContent: 'flex-end',
+    marginBottom: 0, // sheet runs to the bottom edge; content pads for the safe area
   },
   sheet: {
     backgroundColor: palette.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
     paddingHorizontal: space.lg,
-    paddingBottom: space.xl,
+    paddingTop: space.xs,
     ...shadow.raised,
   },
   handle: {
     alignSelf: 'center',
     width: 40,
-    height: 4,
-    borderRadius: radius.pill,
+    height: 5,
+    borderRadius: 3,
     backgroundColor: palette.border,
-    marginTop: space.xs,
     marginBottom: space.lg,
   },
   header: {
@@ -164,14 +135,10 @@ const styles = StyleSheet.create({
   },
   title: {
     marginTop: space.sm,
-    fontSize: 22,
-    fontWeight: font.bold,
-    color: palette.text,
+    textAlign: 'center',
   },
   subtitle: {
     marginTop: space.xxs,
-    fontSize: 14,
-    lineHeight: 20,
     color: palette.textMuted,
     textAlign: 'center',
   },
@@ -181,16 +148,11 @@ const styles = StyleSheet.create({
     marginTop: space.lg,
     padding: space.md,
     borderRadius: radius.lg,
-    backgroundColor: palette.surfaceMuted,
+    backgroundColor: palette.background,
   },
   partnerText: {
     flex: 1,
     marginHorizontal: space.sm,
-  },
-  partnerName: {
-    fontSize: 16,
-    fontWeight: font.semibold,
-    color: palette.text,
   },
   contactRow: {
     flexDirection: 'row',
@@ -198,39 +160,11 @@ const styles = StyleSheet.create({
     gap: space.xxs,
     marginTop: 2,
   },
-  contactText: {
-    fontSize: 13,
+  muted: {
     color: palette.textMuted,
   },
   actions: {
     marginTop: space.lg,
     gap: space.xs,
-  },
-  button: {
-    borderRadius: radius.md,
-  },
-  buttonContent: {
-    height: 48,
-  },
-  buttonLabel: {
-    fontSize: 15,
-    fontWeight: font.semibold,
-  },
-  tips: {
-    marginTop: space.md,
-    padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: palette.primarySoft,
-  },
-  tipsTitle: {
-    fontSize: 14,
-    fontWeight: font.semibold,
-    color: palette.primaryDark,
-    marginBottom: space.xxs,
-  },
-  tipsText: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: palette.text,
   },
 });

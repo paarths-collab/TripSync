@@ -1,186 +1,330 @@
 // src/components/pooling/OlaMapWebView.tsx
-import React, { useMemo, forwardRef, useEffect } from 'react';
-import { WebView } from 'react-native-webview';
-import * as Location from 'expo-location';
+// Full-bleed Ola Maps view rendered in a WebView (native maps come later).
+// Markers and the route are declarative props; the component replays them
+// whenever the page (re)loads. Camera moves are imperative via the ref.
+// If the SDK, key or network fails, or the map doesn't load in time, a
+// React Native banner with a retry replaces the map. On web, where
+// react-native-webview isn't supported, a placeholder card is shown instead.
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
+import { Text } from 'react-native-paper';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
+
+import { Banner, Button, Card, IconBadge } from '../ui';
 import { OLA_MAPS_API_KEY } from '../../constants/config';
-import { palette } from '../../constants/theme';
+import { palette, shadow, space, type } from '../../constants/theme';
+import {
+  buildMapHtml,
+  commandScript,
+  parseMapEvent,
+  sanitizeRoute,
+  type MapCommand,
+  type MapFailureReason,
+  type MapInsets,
+  type MapPoint,
+  type RouteLine,
+} from './mapBridge';
 
-const TILESET_URL = 'https://api.olamaps.io/tiles/vector/v1/3dtiles/tileset.json';
+export type { MapPoint, MapInsets, RouteLine } from './mapBridge';
 
-interface OlaMapWebViewProps {
-  onMapReady: () => void;
-  onMapCenterChange: (coords: { lat: number; lng: number }) => void;
+const LOAD_TIMEOUT_MS = 25000; // the SDK bundle is large; allow for slow mobile data
+const SIDE_PADDING = 48;
+const FIT_MARGIN = 28;
+
+export interface OlaMapHandle {
+  /** Centre on a point. `exact` ignores the overlay insets (used when the centre pin sets the pickup). */
+  flyTo: (point: MapPoint, options?: { zoom?: number; exact?: boolean }) => void;
+  /** Frame pickup, destination and route above the bottom sheet. */
+  fitTrip: () => void;
 }
 
-const OlaMapWebView = forwardRef<WebView, OlaMapWebViewProps>(({ onMapReady, onMapCenterChange }, ref) => {
+interface OlaMapWebViewProps {
+  pickup: MapPoint | null;
+  /** Hidden while the centre pin is used to choose a pickup. */
+  showPickup?: boolean;
+  userLocation?: MapPoint | null;
+  destination: MapPoint | null;
+  route: RouteLine | null;
+  insets: MapInsets;
+  pitch?: number;
+  onCenterChange?: (point: MapPoint, byUser: boolean) => void;
+  onReadyChange?: (ready: boolean) => void;
+}
+
+type Status = 'loading' | 'ready' | 'failed';
+
+const pointKey = (p: MapPoint | null | undefined) => (p ? `${p.lat.toFixed(6)},${p.lng.toFixed(6)}` : '-');
+
+const OlaMapWebView = forwardRef<OlaMapHandle, OlaMapWebViewProps>(function OlaMapWebView(
+  { pickup, showPickup = true, userLocation = null, destination, route, insets, pitch = 0, onCenterChange, onReadyChange },
+  ref,
+) {
+  const isWeb = Platform.OS === 'web';
+  const webRef = useRef<WebView>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [status, setStatus] = useState<Status>(isWeb || !OLA_MAPS_API_KEY ? 'failed' : 'loading');
+  const [failure, setFailure] = useState<MapFailureReason | null>(isWeb ? null : OLA_MAPS_API_KEY ? null : 'missing_key');
+  const ready = status === 'ready';
+
+  // Latest values for callbacks that shouldn't re-subscribe.
+  const latest = useRef({ pickup, destination, insets, onCenterChange, onReadyChange });
+  latest.current = { pickup, destination, insets, onCenterChange, onReadyChange };
+
   const html = useMemo(
-    () => `
-<!doctype html>
-<html>
-  <head>
-    <meta name="viewport" content="initial-scale=1, width=device-width, user-scalable=no" />
-    <style> html,body,#map { height:100%; margin:0; padding:0; background:${palette.background}; } </style>
-    <script src="https://cdn.jsdelivr.net/npm/olamaps-web-sdk@1.1.4/dist/olamaps-web-sdk.umd.min.js"></script>
-  </head>
-  <body>
-    <div id="map"></div>
-    <script>
-      (async function () {
-        const sdk = new OlaMaps({ apiKey: '${OLA_MAPS_API_KEY}' });
-        const map = await sdk.init({
-          container: 'map', center: [72.8371, 19.1073], zoom: 15, pitch: 60, mode: '3d', tileset: '${TILESET_URL}'
-        });
-
-        let playerMarker = null;
-        let destinationMarker = null;
-
-        window.flyTo = (coords, zoom = 17) => {
-          map.flyTo({ center: [coords.lng, coords.lat], zoom: zoom, duration: 1500 });
-        };
-        
-        window.addOrUpdateDestinationMarker = async (coords) => {
-          const position = [coords.lng, coords.lat];
-          if (destinationMarker) {
-            destinationMarker.setPosition(position);
-          } else {
-            destinationMarker = await sdk.addMarker({ position: position, draggable: false });
-          }
-        };
-
-        window.clearDestinationMarker = () => {
-          if (destinationMarker) {
-            try { destinationMarker.remove(); } catch(e) { console.error("Could not remove marker:", e); }
-            destinationMarker = null;
-          }
-        };
-
-        window.setMapPitch = (pitch) => {
-          map.easeTo({ pitch: pitch, duration: 750 });
-        };
-
-        // Updated drawRoute function - removed is_fallback parameter since we no longer use fallbacks
-        window.drawRoute = (polyline) => {
-          // Clear existing route first
-          if (map.getLayer('route')) { 
-            map.removeLayer('route'); 
-            map.removeSource('route'); 
-          }
-          
-          // Add new route layer with proper styling
-          map.addLayer({
-            'id': 'route', 
-            'type': 'line',
-            'source': { 
-              'type': 'geojson', 
-              'data': { 
-                'type': 'Feature', 
-                'geometry': { 
-                  'type': 'LineString', 
-                  'coordinates': polyline 
-                }
-              }
-            },
-            'paint': { 
-              'line-color': '${palette.primary}',
-              'line-width': 6,
-              'line-cap': 'round',
-              'line-join': 'round'
-            }
-          });
-        };
-        
-        window.clearRoute = () => {
-          if (map.getLayer('route')) { 
-            map.removeLayer('route'); 
-            map.removeSource('route'); 
-          }
-        };
-
-        map.on('moveend', () => {
-          const center = map.getCenter();
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'mapCenterChange', payload: { lng: center.lng, lat: center.lat }
-          }));
-        });
-        
-        window.updatePlayerView = async (coords) => {
-          const position = [coords.lng, coords.lat];
-          if (!playerMarker) {
-            try {
-              playerMarker = await sdk.addMarker({ position: position, draggable: false });
-            } catch(e) {
-              console.error("Could not add player marker:", e);
-            }
-          } else {
-            if (playerMarker.setPosition) {
-              playerMarker.setPosition(position);
-            }
-          }
-        };
-
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ready' }));
-      })();
-    </script>
-  </body>
-</html>`,
-    []
+    () =>
+      buildMapHtml({
+        apiKey: OLA_MAPS_API_KEY,
+        colors: {
+          background: palette.background,
+          ink: palette.ink,
+          ink2: palette.ink2,
+          yellow: palette.yellow,
+          white: palette.surface,
+        },
+      }),
+    [],
   );
 
+  const send = useCallback(
+    (command: MapCommand) => {
+      if (!ready) return;
+      webRef.current?.injectJavaScript(commandScript(command));
+    },
+    [ready],
+  );
+
+  const fail = useCallback((reason: MapFailureReason) => {
+    setStatus((current) => (current === 'loading' ? 'failed' : current));
+    setFailure((current) => current ?? reason);
+  }, []);
+
   useEffect(() => {
-    let locationSubscription: Location.LocationSubscription | null = null;
-    
-    const startWatchingLocation = async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.log('Location permission not granted');
-        return;
+    latest.current.onReadyChange?.(ready);
+  }, [ready]);
+
+  // Give up if the page never reports that the map loaded.
+  useEffect(() => {
+    if (status !== 'loading') return;
+    const timer = setTimeout(() => fail('timeout'), LOAD_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [status, reloadKey, fail]);
+
+  const retry = useCallback(() => {
+    if (isWeb || !OLA_MAPS_API_KEY) return;
+    setFailure(null);
+    setStatus('loading');
+    setReloadKey((key) => key + 1);
+  }, [isWeb]);
+
+  // --- Declarative layers (re-sent whenever the page becomes ready) ---
+  const visiblePickup = showPickup ? pickup : null;
+  const cleanRoute = useMemo(() => sanitizeRoute(route), [route]);
+
+  useEffect(() => {
+    send({ type: 'setPickup', point: visiblePickup });
+  }, [send, visiblePickup]);
+  useEffect(() => {
+    send({ type: 'setUser', point: userLocation });
+  }, [send, userLocation]);
+  useEffect(() => {
+    send({ type: 'setDestination', point: destination });
+  }, [send, destination]);
+  useEffect(() => {
+    send({ type: 'setRoute', coords: cleanRoute });
+  }, [send, cleanRoute]);
+  useEffect(() => {
+    send({ type: 'insets', top: insets.top, bottom: insets.bottom });
+  }, [send, insets.top, insets.bottom]);
+  useEffect(() => {
+    send({ type: 'pitch', value: pitch });
+  }, [send, pitch]);
+
+  // --- Camera ---
+  const flyTo = useCallback(
+    (point: MapPoint, options?: { zoom?: number; exact?: boolean }) => {
+      const { top, bottom } = latest.current.insets;
+      send({
+        type: 'flyTo',
+        point,
+        zoom: options?.zoom ?? 16,
+        offsetY: options?.exact ? 0 : Math.round((top - bottom) / 2),
+      });
+    },
+    [send],
+  );
+
+  const fitTrip = useCallback(() => {
+    const { insets: current, destination: dest, pickup: start } = latest.current;
+    if (!dest) {
+      if (start) flyTo(start);
+      return;
+    }
+    send({
+      type: 'fit',
+      padding: { top: current.top + FIT_MARGIN, bottom: current.bottom + FIT_MARGIN, side: SIDE_PADDING },
+    });
+  }, [send, flyTo]);
+
+  useImperativeHandle(ref, () => ({ flyTo, fitTrip }), [flyTo, fitTrip]);
+
+  // Re-frame the trip when its geometry or the sheet height changes.
+  const tripKey = destination
+    ? `${pointKey(destination)}|${pointKey(pickup)}|${cleanRoute?.length ?? 0}|${Math.round(insets.bottom / 24)}`
+    : null;
+  useEffect(() => {
+    if (ready && tripKey) fitTrip();
+  }, [ready, tripKey, fitTrip]);
+
+  // First frame: centre on the pickup as soon as both the map and a pickup exist.
+  const hasPickup = !!pickup;
+  const centredOnce = useRef(false);
+  useEffect(() => {
+    if (!ready) {
+      centredOnce.current = false;
+      return;
+    }
+    if (centredOnce.current || !hasPickup || latest.current.destination) return;
+    centredOnce.current = true;
+    const start = latest.current.pickup;
+    if (start) flyTo(start);
+  }, [ready, hasPickup, flyTo]);
+
+  const handleMessage = useCallback(
+    (event: WebViewMessageEvent) => {
+      const message = parseMapEvent(event.nativeEvent.data);
+      if (!message) return; // ignore anything malformed or unexpected
+      if (message.type === 'ready') {
+        setStatus((current) => (current === 'loading' ? 'ready' : current));
+      } else if (message.type === 'error') {
+        fail(message.reason);
+      } else if (message.type === 'center') {
+        latest.current.onCenterChange?.({ lat: message.lat, lng: message.lng }, message.byUser);
       }
+    },
+    [fail],
+  );
 
-      locationSubscription = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 5 },
-        (loc) => {
-          const { latitude: lat, longitude: lng } = loc.coords;
-          const js = `window.updatePlayerView && window.updatePlayerView({ lng:${lng}, lat:${lat} }); true;`;
-          
-          if (ref && typeof ref !== 'function' && ref.current) {
-            ref.current.injectJavaScript(js);
-          }
-        }
-      );
-    };
-
-    startWatchingLocation();
-
-    return () => {
-      if (locationSubscription) {
-        locationSubscription.remove();
-      }
-    };
-  }, [ref]);
+  if (isWeb) {
+    return (
+      <View style={styles.fill}>
+        <View style={[styles.placeholderWrap, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+          <Card style={styles.placeholderCard}>
+            <IconBadge icon="map-outline" tone="primary" size={48} />
+            <Text style={[type.title3, styles.placeholderTitle]}>Map preview is in the mobile app</Text>
+            <Text style={[type.label, styles.placeholderBody]}>
+              You can still choose a destination and find students going your way here.
+            </Text>
+          </Card>
+        </View>
+      </View>
+    );
+  }
 
   return (
-    <WebView
-      ref={ref}
-      originWhitelist={['*']}
-      source={{ html }}
-      javaScriptEnabled
-      domStorageEnabled
-      onMessage={(event) => {
-        try {
-          const data = JSON.parse(event.nativeEvent.data);
-          if (data.type === 'ready') {
-            onMapReady();
-          } else if (data.type === 'mapCenterChange') {
-            onMapCenterChange(data.payload);
-          }
-        } catch (error) {
-          console.error("Error parsing message from WebView:", error);
-        }
-      }}
-    />
+    <View style={styles.fill}>
+      {status !== 'failed' ? (
+        <WebView
+          key={reloadKey}
+          ref={webRef}
+          style={styles.webview}
+          originWhitelist={['*']}
+          source={{ html }}
+          javaScriptEnabled
+          domStorageEnabled
+          scrollEnabled={false}
+          bounces={false}
+          overScrollMode="never"
+          setBuiltInZoomControls={false}
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+          onMessage={handleMessage}
+          onError={() => fail('webview')}
+          onContentProcessDidTerminate={retry}
+          onRenderProcessGone={retry}
+          accessibilityLabel="Map"
+        />
+      ) : (
+        <View style={styles.failedMap} />
+      )}
+
+      {status === 'failed' && failure ? (
+        <View style={[styles.bannerWrap, { top: insets.top + space.sm }]} pointerEvents="box-none">
+          <Banner
+            tone="warning"
+            icon="map-outline"
+            text={failureMessage(failure)}
+            style={styles.banner}
+            action={
+              failure === 'missing_key' ? undefined : (
+                <Button label="Retry" size="sm" variant="dark" fullWidth={false} onPress={retry} style={styles.retry} />
+              )
+            }
+          />
+        </View>
+      ) : null}
+    </View>
   );
 });
 
-OlaMapWebView.displayName = 'OlaMapWebView';
+function failureMessage(reason: MapFailureReason): string {
+  const stillWorks = 'You can still choose a destination and find students going your way.';
+  switch (reason) {
+    case 'missing_key':
+      return `The map isn't set up in this build. ${stillWorks}`;
+    case 'auth':
+      return `The map service didn't accept this app's map key. ${stillWorks}`;
+    case 'timeout':
+      return `The map is taking too long to load. Check your connection. ${stillWorks}`;
+    default:
+      return `The map couldn't load. Check your connection. ${stillWorks}`;
+  }
+}
 
 export default OlaMapWebView;
+
+const styles = StyleSheet.create({
+  fill: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: palette.background,
+  },
+  webview: {
+    flex: 1,
+    backgroundColor: palette.background,
+  },
+  failedMap: {
+    flex: 1,
+    backgroundColor: palette.surfaceMuted,
+  },
+  bannerWrap: {
+    position: 'absolute',
+    left: space.md,
+    right: space.md,
+  },
+  banner: {
+    alignItems: 'center',
+    ...shadow.card,
+  },
+  retry: {
+    marginLeft: space.xs,
+  },
+  placeholderWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: space.lg,
+    backgroundColor: palette.surfaceMuted,
+  },
+  placeholderCard: {
+    alignItems: 'center',
+    paddingVertical: space.xl,
+    paddingHorizontal: space.lg,
+  },
+  placeholderTitle: {
+    marginTop: space.md,
+    textAlign: 'center',
+  },
+  placeholderBody: {
+    marginTop: space.xxs,
+    color: palette.textMuted,
+    textAlign: 'center',
+  },
+});

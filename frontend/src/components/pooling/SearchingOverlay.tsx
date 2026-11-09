@@ -1,45 +1,37 @@
 // src/components/pooling/SearchingOverlay.tsx
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { ActivityIndicator, Button, Text } from 'react-native-paper';
-import { StatusPill } from '../ui';
-import { palette, space, radius, font, shadow } from '../../constants/theme';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { Text } from 'react-native-paper';
+
+import { Button, Sheet, Tag } from '../ui';
+import { layout, palette, space, type } from '../../constants/theme';
 
 interface SearchingOverlayProps {
   visible: boolean;
   onCancel: () => void;
+  destinationName?: string | null;
 }
 
-export default function SearchingOverlay({ visible, onCancel }: SearchingOverlayProps) {
-  // Render nothing if the overlay is not supposed to be visible.
-  if (!visible) {
-    return null;
-  }
+export default function SearchingOverlay({ visible, onCancel, destinationName }: SearchingOverlayProps) {
+  if (!visible) return null;
 
   return (
     <View style={styles.overlay}>
-      <View style={styles.sheet}>
-        <View style={styles.handle} />
+      <Sheet style={styles.sheet}>
         <View style={styles.spinnerWrap}>
-          <ActivityIndicator size="large" color={palette.primary} />
+          <ActivityIndicator size="large" color={palette.ink} accessibilityLabel="Searching" />
         </View>
-        <StatusPill label="Searching" tone="primary" icon="search" style={styles.pill} />
-        <Text style={styles.title}>Looking for a ride partner</Text>
-        <Text style={styles.body}>
-          We&apos;re checking for students heading the same way. This can take a moment — we&apos;ll
-          show you anyone we find here.
+        <Tag label="Searching" tone="primary" icon="search" style={styles.tag} />
+        <Text style={[type.title2, styles.center]} accessibilityLiveRegion="polite">
+          Looking for students going your way
         </Text>
-        <Button
-          mode="outlined"
-          onPress={onCancel}
-          textColor={palette.danger}
-          style={styles.cancelButton}
-          contentStyle={styles.buttonContent}
-          labelStyle={styles.buttonLabel}
-        >
-          Cancel search
-        </Button>
-      </View>
+        <Text style={[type.body, styles.body]}>
+          {destinationName
+            ? `We're checking for students heading towards ${destinationName}. Anyone we find shows up here.`
+            : "We're checking for students heading the same way. Anyone we find shows up here."}
+        </Text>
+        <Button label="Cancel search" variant="outline" onPress={onCancel} style={styles.cancel} />
+      </Sheet>
     </View>
   );
 }
@@ -51,59 +43,33 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: palette.surface,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    paddingHorizontal: space.xl,
-    paddingBottom: space.xl,
     alignItems: 'center',
-    ...shadow.raised,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: radius.pill,
-    backgroundColor: palette.border,
-    marginTop: space.xs,
-    marginBottom: space.lg,
+    paddingTop: space.xs,
+    paddingBottom: layout.tabBarSpace,
   },
   spinnerWrap: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: palette.primarySoft,
+    backgroundColor: palette.yellowSoft,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: space.sm,
   },
-  pill: {
+  tag: {
     alignSelf: 'center',
     marginTop: space.md,
   },
-  title: {
+  center: {
     marginTop: space.sm,
-    fontSize: 20,
-    fontWeight: font.bold,
-    color: palette.text,
     textAlign: 'center',
   },
   body: {
     marginTop: space.xs,
-    fontSize: 14,
-    lineHeight: 20,
     color: palette.textMuted,
     textAlign: 'center',
   },
-  cancelButton: {
-    alignSelf: 'stretch',
+  cancel: {
     marginTop: space.lg,
-    borderRadius: radius.md,
-    borderColor: palette.danger,
-  },
-  buttonContent: {
-    height: 48,
-  },
-  buttonLabel: {
-    fontSize: 15,
-    fontWeight: font.semibold,
   },
 });

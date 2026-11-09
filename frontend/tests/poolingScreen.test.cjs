@@ -28,6 +28,8 @@ Module._load = function(request, parent, ...rest) {
   if (request === 'react-native-webview') return { WebView: 'WebView' };
   if (request === 'expo-router') return {
     useRouter: () => ({ push() {} }),
+    // `focused` is a test switch: re-run the effect when a test flips it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useFocusEffect: callback => React.useEffect(() => focused ? callback() : undefined, [callback, focused]),
   };
   if (request.endsWith('/context/AuthContext')) return { useAuth: () => ({ token: 'test-token', user: { id: 1 } }) };
