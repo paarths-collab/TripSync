@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   TextInput,
   TextInputProps,
+  Platform,
 } from 'react-native';
 import { Text } from 'react-native-paper';
 import { Ionicons } from '@expo/vector-icons';
@@ -404,6 +405,9 @@ export function ListRow({
 
 /* ---------- TextField ---------- */
 
+// The field draws its own focus border; drop the browser's default outline on web.
+const webNoOutline = (Platform.OS === 'web' ? { outlineStyle: 'none' } : null) as unknown as TextStyle;
+
 export const TextField = forwardRef<
   TextInput,
   TextInputProps & {
@@ -431,7 +435,7 @@ export const TextField = forwardRef<
           ref={ref}
           placeholderTextColor={palette.textMuted}
           accessibilityLabel={label}
-          style={[styles.fieldInput, style as StyleProp<TextStyle>]}
+          style={[styles.fieldInput, webNoOutline, style as StyleProp<TextStyle>]}
           onFocus={(e) => {
             setFocused(true);
             onFocus?.(e);

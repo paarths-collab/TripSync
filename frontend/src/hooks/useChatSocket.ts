@@ -42,8 +42,8 @@ export const useChatSocket = (): UseChatSocketReturn => {
 
       ws.onmessage = (event) => {
         try {
+          // Never log the payload: it carries message text and user details.
           const data = JSON.parse(event.data);
-          console.log('Chat WebSocket message received:', data);
 
           if (data.type === 'chat_message') {
             setChatMessage({
@@ -55,13 +55,14 @@ export const useChatSocket = (): UseChatSocketReturn => {
               created_at: data.created_at,
             });
           }
-        } catch (error) {
-          console.error('Error parsing chat WebSocket message:', error);
+        } catch {
+          console.error('Could not parse a chat WebSocket message');
         }
       };
 
-      ws.onerror = (error) => {
-        console.error('Chat WebSocket error:', error);
+      // The socket URL carries the auth token, so don't log raw error objects.
+      ws.onerror = () => {
+        console.error('Chat WebSocket error');
       };
 
       ws.onclose = () => {
@@ -77,8 +78,8 @@ export const useChatSocket = (): UseChatSocketReturn => {
       };
 
       wsRef.current = ws;
-    } catch (error) {
-      console.error('Error connecting to chat WebSocket:', error);
+    } catch {
+      console.error('Could not open the chat WebSocket');
     }
   }, []);
 
@@ -108,7 +109,6 @@ export const useChatSocket = (): UseChatSocketReturn => {
           created_at: new Date().toISOString(),
         };
         wsRef.current.send(JSON.stringify(message));
-        console.log('Chat message sent via WebSocket:', message);
       } else {
         console.error('Chat WebSocket not connected');
       }

@@ -2,10 +2,10 @@
 
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Text, Button } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import { ServiceApplication } from '../../services/servicesService';
-import { Card, Avatar, StatusPill } from '../ui';
-import { palette, space, radius, font, Tone } from '../../constants/theme';
+import { Button, Card, Avatar, StatusPill } from '../ui';
+import { palette, space, radius, type, Tone } from '../../constants/theme';
 
 interface ApplicantCardProps {
   application: ServiceApplication;
@@ -49,31 +49,23 @@ export default function ApplicantCard({ application, onAccept, onReject, isUpdat
       {status === 'pending' && (
         <View style={styles.actions}>
           <Button
-            mode="outlined"
+            label="Reject"
+            variant="secondary"
+            size="md"
+            icon="close"
             onPress={() => onReject(application.id)}
             disabled={isUpdating}
-            textColor={palette.danger}
-            style={[styles.actionButton, styles.rejectButton]}
-            contentStyle={styles.actionContent}
-            labelStyle={styles.actionLabel}
-            icon="close"
-          >
-            Reject
-          </Button>
-          <Button
-            mode="contained"
-            onPress={() => onAccept(application.id)}
-            disabled={isUpdating}
-            loading={isUpdating}
-            buttonColor={palette.primary}
-            textColor={palette.onPrimary}
             style={styles.actionButton}
-            contentStyle={styles.actionContent}
-            labelStyle={styles.actionLabel}
-            icon="check"
-          >
-            Accept
-          </Button>
+          />
+          <Button
+            label="Accept"
+            variant="dark"
+            size="md"
+            icon="checkmark"
+            onPress={() => onAccept(application.id)}
+            loading={isUpdating}
+            style={styles.actionButton}
+          />
         </View>
       )}
     </Card>
@@ -93,13 +85,13 @@ const styles = StyleSheet.create({
     marginHorizontal: space.sm,
   },
   name: {
+    ...type.bodyStrong,
     fontSize: 16,
-    fontWeight: font.semibold,
     color: palette.text,
   },
   date: {
+    ...type.caption,
     marginTop: 2,
-    fontSize: 12,
     color: palette.textMuted,
   },
   message: {
@@ -109,6 +101,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.surfaceMuted,
   },
   messageText: {
+    ...type.body,
     fontSize: 14,
     lineHeight: 20,
     color: palette.text,
@@ -120,15 +113,5 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
-    borderRadius: radius.md,
-  },
-  rejectButton: {
-    borderColor: palette.danger,
-  },
-  actionContent: {
-    paddingVertical: 2,
-  },
-  actionLabel: {
-    fontWeight: font.semibold,
   },
 });

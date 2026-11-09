@@ -8,68 +8,117 @@ import {
   Platform,
   Pressable,
   TextInput,
+  AppState,
+  BackHandler,
+  Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Message, getMessages, sendMessage, markMessagesAsRead, findOrCreateConversation } from '../../services/chatService';
 import { useAuth } from '../../context/AuthContext';
-import { palette, space, radius, font } from '../../constants/theme';
+import { palette, space, radius, type, fonts, shadow } from '../../constants/theme';
 import { Avatar, EmptyState, IconButton, LoadingState } from '../../components/ui';
+
+const QUICK_MESSAGES = ["Where are you?", "I'm on my way", 'See you soon', 'Running late', "I'm here"];
 
 export default function ChatScreen() {
   const router = useRouter();
   const { token, user } = useAuth();
+  const userId = user?.id;
   const params = useLocalSearchParams<{
     conversationId?: string;
     partnerId: string;
     partnerName: string;
+    from?: string;
   }>();
-  
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
   const [conversationId, setConversationId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList>(null);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const partnerId = parseInt(params.partnerId || '0');
   const partnerName = params.partnerName || 'Partner';
   const initialConversationId = params.conversationId ? parseInt(params.conversationId) : null;
+  const cameFromChats = params.from === 'chats';
 
-  // Find or create conversation on mount
+  // This screen lives in the tab navigator, whose back action returns to the
+  // first tab. Go back to the chat list when we were opened from it; otherwise
+  // go back (e.g. to the ride screen), falling back to the chat list.
+  const handleBack = useCallback(() => {
+    if (!cameFromChats && router.canGoBack()) {
+      router.back();
+    } else {
+      router.navigate('/(main)/chats');
+    }
+  }, [cameFromChats, router]);
+
+  // Android hardware back follows the same rule as the on-screen button.
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        handleBack();
+        return true;
+      });
+      return () => sub.remove();
+    }, [handleBack])
+  );
+
+  // Track the keyboard so the composer can sit above the floating tab bar
+  // when the keyboard is closed.
   useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Find or create the conversation whenever the chat partner changes. The tab
+  // keeps this screen mounted, so clear the previous partner's messages first.
+  useEffect(() => {
+    setMessages([]);
+    setConversationId(null);
+    setLoading(true);
+
     const initializeConversation = async () => {
-      if (!token || !user || !partnerId) {
+      if (!token || !userId || !partnerId) {
         setLoading(false);
         return;
       }
 
       try {
         let convId = initialConversationId;
-        
+
         // If no conversation ID provided, find or create one
         if (!convId) {
           const conversation = await findOrCreateConversation(token, partnerId);
           convId = conversation.conversation_id;
         }
-        
+
         setConversationId(convId);
         setLoading(false);
-      } catch (error) {
-        console.error('Failed to initialize conversation:', error);
+      } catch {
+        console.error('Failed to initialize conversation');
         setLoading(false);
       }
     };
 
     initializeConversation();
-  }, [token, user, partnerId, initialConversationId]);
+  }, [token, userId, partnerId, initialConversationId]);
 
-  // Load messages function
   const loadMessages = useCallback(async () => {
     if (!token || !conversationId) return;
-    
+
     try {
       const fetchedMessages = await getMessages(token, conversationId);
       setMessages(fetchedMessages);
@@ -77,8 +126,8 @@ export default function ChatScreen() {
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: false });
       }, 100);
-    } catch (error) {
-      console.error('Failed to load messages:', error);
+    } catch {
+      console.error('Failed to load messages');
     }
   }, [token, conversationId]);
 
@@ -89,20 +138,19 @@ export default function ChatScreen() {
     }
   }, [conversationId, loadMessages]);
 
-  // Polling: Fetch messages every 2 seconds when screen is focused
+  // Polling: fetch messages every 2 seconds while the screen is focused.
+  // Stops when the screen loses focus; polls are skipped while the app is in
+  // the background.
   useFocusEffect(
     useCallback(() => {
       if (!conversationId) return;
 
-      // Load immediately
       loadMessages();
 
-      // Set up polling every 2 seconds
       pollingIntervalRef.current = setInterval(() => {
-        loadMessages();
+        if (AppState.currentState === 'active') loadMessages();
       }, 2000);
 
-      // Cleanup on unmount or when screen loses focus
       return () => {
         if (pollingIntervalRef.current) {
           clearInterval(pollingIntervalRef.current);
@@ -121,19 +169,19 @@ export default function ChatScreen() {
 
     try {
       const newMessage = await sendMessage(token, partnerId, messageContent);
-      
+
       // Update conversation ID if it was just created
       if (!conversationId && newMessage.conversation_id) {
         setConversationId(newMessage.conversation_id);
       }
-      
+
       setMessages((prev) => [...prev, newMessage]);
 
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
-    } catch (error) {
-      console.error('Failed to send message:', error);
+    } catch {
+      console.error('Failed to send message');
       if (!messageText) {
         setInputText(messageContent);
       }
@@ -142,14 +190,6 @@ export default function ChatScreen() {
     }
   };
 
-  const quickMessages = [
-    "Where are you?",
-    "I'm on my way",
-    "See you soon",
-    "Running late",
-    "I'm here"
-  ];
-
   const canSend = inputText.trim().length > 0 && !sending;
 
   const renderMessage = ({ item }: { item: Message }) => {
@@ -157,23 +197,11 @@ export default function ChatScreen() {
     const isMyMessage = item.sender_id === user.id;
 
     return (
-      <View
-        style={[
-          styles.messageRow,
-          isMyMessage ? styles.myMessageRow : styles.theirMessageRow,
-        ]}
-      >
-        <View
-          style={[
-            styles.messageBubble,
-            isMyMessage ? styles.myMessageBubble : styles.theirMessageBubble,
-          ]}
-        >
-          <Text style={[styles.messageText, isMyMessage && styles.myMessageText]}>
-            {item.content}
-          </Text>
+      <View style={[styles.messageRow, isMyMessage ? styles.myMessageRow : styles.theirMessageRow]}>
+        <View style={[styles.messageBubble, isMyMessage ? styles.myMessageBubble : styles.theirMessageBubble]}>
+          <Text style={styles.messageText}>{item.content}</Text>
         </View>
-        <Text style={[styles.timeText, isMyMessage && styles.myTimeText]}>
+        <Text style={styles.timeText}>
           {new Date(item.created_at).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
@@ -184,16 +212,18 @@ export default function ChatScreen() {
   };
 
   const header = (
-    <View style={styles.header}>
-      <IconButton
-        icon="chevron-back"
-        label="Back to chats"
-        onPress={() => router.push('/(main)/chats')}
-      />
-      <View style={styles.headerCenter}>
-        <Avatar name={partnerName} size={40} />
+    <View style={styles.headerWrap}>
+      <View style={styles.headerCard}>
+        <IconButton
+          icon="chevron-back"
+          label="Go back"
+          size={44}
+          onPress={handleBack}
+          style={styles.backButton}
+        />
+        <Avatar name={partnerName} size={44} />
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
+          <Text style={styles.headerTitle} numberOfLines={1} accessibilityRole="header">
             {partnerName}
           </Text>
           <Text style={styles.headerSubtitle} numberOfLines={1}>
@@ -213,11 +243,11 @@ export default function ChatScreen() {
     );
   }
 
+  // The tab bar is hidden on this screen, so the composer only needs the safe area.
+  const composerBottom = keyboardVisible ? space.sm : Math.max(insets.bottom, space.sm);
+
   return (
-    <KeyboardAvoidingView
-      style={styles.fill}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
         {header}
 
@@ -242,55 +272,54 @@ export default function ChatScreen() {
           }
         />
 
-        {/* Quick Message Pills */}
+        {/* Quick replies */}
         {inputText.length === 0 && (
-          <View style={styles.quickMessagesContainer}>
-            <FlatList
-              data={quickMessages}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.quickMessagesList}
-              keyExtractor={(item, index) => `quick-${index}`}
-              renderItem={({ item }) => (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.quickMessagePill,
-                    (pressed || sending) && styles.quickMessagePillDim,
-                  ]}
-                  onPress={() => handleSendMessage(item)}
-                  disabled={sending}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Send quick message: ${item}`}
-                >
-                  <Text style={styles.quickMessageText}>{item}</Text>
-                </Pressable>
-              )}
-            />
-          </View>
+          <FlatList
+            data={QUICK_MESSAGES}
+            horizontal
+            style={styles.quickMessages}
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.quickMessagesList}
+            keyExtractor={(item) => item}
+            renderItem={({ item }) => (
+              <Pressable
+                style={({ pressed }) => [styles.quickMessagePill, (pressed || sending) && styles.quickMessagePillDim]}
+                onPress={() => handleSendMessage(item)}
+                disabled={sending}
+                accessibilityRole="button"
+                accessibilityLabel={`Send quick message: ${item}`}
+              >
+                <Text style={styles.quickMessageText}>{item}</Text>
+              </Pressable>
+            )}
+          />
         )}
 
         {/* Composer */}
-        <View style={styles.composer}>
-          <TextInput
-            placeholder="Message"
-            placeholderTextColor={palette.textFaint}
-            value={inputText}
-            onChangeText={setInputText}
-            style={styles.input}
-            multiline
-            maxLength={500}
-            editable={!sending}
-            accessibilityLabel="Message"
-          />
-          <IconButton
-            icon="send"
-            label="Send message"
-            tone={canSend ? 'primary' : 'neutral'}
-            size={44}
-            onPress={canSend ? () => handleSendMessage() : undefined}
-            style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
-          />
+        <View style={[styles.composer, { paddingBottom: composerBottom }]}>
+          <View style={styles.inputPill}>
+            <TextInput
+              placeholder="Message"
+              placeholderTextColor={palette.textMuted}
+              value={inputText}
+              onChangeText={setInputText}
+              style={styles.input}
+              multiline
+              maxLength={500}
+              editable={!sending}
+              accessibilityLabel="Message"
+            />
+          </View>
+          <View style={!canSend && styles.sendDisabled} pointerEvents={canSend ? 'auto' : 'none'}>
+            <IconButton
+              icon="send"
+              label="Send message"
+              tone="dark"
+              size={48}
+              onPress={canSend ? () => handleSendMessage() : undefined}
+            />
+          </View>
         </View>
       </SafeAreaView>
     </KeyboardAvoidingView>
@@ -305,34 +334,35 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: palette.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  headerWrap: {
     paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    backgroundColor: palette.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: palette.border,
+    paddingTop: space.xs,
+    paddingBottom: space.xs,
   },
-  headerCenter: {
-    flex: 1,
+  headerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: space.sm,
+    padding: space.xs,
+    paddingRight: space.md,
+    backgroundColor: palette.surface,
+    borderRadius: radius.xl,
+    ...shadow.card,
+  },
+  backButton: {
+    backgroundColor: palette.surfaceMuted,
+    marginRight: space.sm,
   },
   headerInfo: {
     flex: 1,
     marginLeft: space.sm,
   },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: font.semibold,
+    ...type.title3,
     color: palette.text,
   },
   headerSubtitle: {
-    fontSize: 12,
+    ...type.caption,
     color: palette.textMuted,
-    marginTop: 2,
   },
   messagesList: {
     paddingHorizontal: space.md,
@@ -354,86 +384,77 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     paddingHorizontal: space.md,
-    paddingVertical: space.xs + 2,
+    paddingVertical: space.sm,
     borderRadius: radius.lg,
   },
   myMessageBubble: {
-    backgroundColor: palette.primary,
-    borderBottomRightRadius: radius.sm / 2,
+    backgroundColor: palette.yellowSoft,
+    borderBottomRightRadius: 6,
   },
   theirMessageBubble: {
     backgroundColor: palette.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: palette.border,
-    borderBottomLeftRadius: radius.sm / 2,
+    borderBottomLeftRadius: 6,
+    ...shadow.card,
   },
   messageText: {
-    fontSize: 15,
-    lineHeight: 21,
-    color: palette.text,
-  },
-  myMessageText: {
-    color: palette.onPrimary,
+    ...type.body,
+    color: palette.ink,
   },
   timeText: {
+    ...type.caption,
     fontSize: 11,
     marginTop: space.xxs,
     marginHorizontal: space.xxs,
     color: palette.textFaint,
   },
-  myTimeText: {
-    textAlign: 'right',
-  },
-  quickMessagesContainer: {
-    paddingVertical: space.xs,
-    backgroundColor: palette.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: palette.border,
+  quickMessages: {
+    flexGrow: 0,
   },
   quickMessagesList: {
     paddingHorizontal: space.md,
+    paddingVertical: space.xs,
     gap: space.xs,
   },
   quickMessagePill: {
-    paddingHorizontal: space.sm,
-    paddingVertical: space.xs - 2,
-    backgroundColor: palette.primarySoft,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
+    backgroundColor: palette.surface,
     borderRadius: radius.pill,
+    ...shadow.card,
   },
   quickMessagePillDim: {
     opacity: 0.6,
   },
   quickMessageText: {
-    fontSize: 13,
-    color: palette.primaryDark,
-    fontWeight: font.medium,
+    ...type.label,
+    fontFamily: fonts.semibold,
+    color: palette.ink,
   },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: space.md,
     paddingTop: space.xs,
-    paddingBottom: space.sm,
+    gap: space.xs,
+  },
+  inputPill: {
+    flex: 1,
+    minHeight: 48,
+    justifyContent: 'center',
     backgroundColor: palette.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: palette.border,
+    borderRadius: radius.xl,
+    ...shadow.card,
   },
   input: {
-    flex: 1,
-    minHeight: 44,
     maxHeight: 120,
-    paddingHorizontal: space.md,
-    paddingTop: space.sm,
-    paddingBottom: space.sm,
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.xl,
+    paddingHorizontal: space.lg,
+    paddingTop: 13,
+    paddingBottom: 13,
+    fontFamily: fonts.regular,
     fontSize: 15,
     color: palette.text,
   },
-  sendButton: {
-    marginLeft: space.xs,
-  },
-  sendButtonDisabled: {
-    opacity: 0.6,
+  sendDisabled: {
+    opacity: 0.4,
   },
 });

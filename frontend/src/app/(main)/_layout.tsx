@@ -2,11 +2,11 @@
 // Floating pill tab bar (reference R1): white pill with a black rounded-square
 // active tab and a yellow icon.
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Tabs } from 'expo-router';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Keyboard, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palette, radius, shadow, space, type, fonts } from '../../constants/theme';
@@ -20,12 +20,29 @@ const TAB_ICONS: Record<string, string> = {
   profile: 'person',
 };
 
+// Screens that take the full height (a conversation has its own composer at the bottom).
+const HIDE_ON = new Set(['chat']);
+
+function useKeyboardVisible() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setVisible(true));
+    const hide = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setVisible(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return visible;
+}
+
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
   const routes = state.routes.filter((r) => TAB_ICONS[r.name]);
   const focusedName = state.routes[state.index]?.name;
-  // The single-chat screen is hidden from the bar; keep "Chats" highlighted there.
-  const activeName = focusedName === 'chat' ? 'chats' : focusedName;
+  if (HIDE_ON.has(focusedName) || keyboardVisible) return null;
+  const activeName = focusedName;
 
   return (
     <View

@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ServicePost } from '../../services/servicesService';
 import { useAuth } from '../../context/AuthContext';
 import { Card, Avatar, StatusPill } from '../ui';
-import { palette, space, radius, font, Tone } from '../../constants/theme';
+import { palette, space, radius, type, fonts, Tone } from '../../constants/theme';
 
 interface ServiceCardProps {
   post: ServicePost;
@@ -87,7 +87,7 @@ export default function ServiceCard({ post, onPostDeleted }: ServiceCardProps) {
               onPress={handleDelete}
               title="Delete post"
               leadingIcon="delete-outline"
-              titleStyle={{ color: palette.danger }}
+              titleStyle={styles.menuItemTitle}
             />
           </Menu>
         )}
@@ -135,7 +135,7 @@ export default function ServiceCard({ post, onPostDeleted }: ServiceCardProps) {
       </View>
 
       <View style={styles.footer}>
-        <Avatar name={post.is_anonymous ? null : posterName} size={28} />
+        <Avatar name={post.is_anonymous ? null : posterName} size={32} />
         <View style={styles.footerText}>
           <Text style={styles.posterName} numberOfLines={1}>{posterName}</Text>
           <Text style={styles.date}>{formatPostedDate(post.created_at)}</Text>
@@ -165,16 +165,19 @@ const styles = StyleSheet.create({
     backgroundColor: palette.surface,
     borderRadius: radius.md,
   },
+  menuItemTitle: {
+    ...type.bodyStrong,
+    color: palette.danger,
+  },
   title: {
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: font.semibold,
+    ...type.title3,
     color: palette.text,
   },
   description: {
-    marginTop: space.xxs,
+    ...type.body,
     fontSize: 14,
     lineHeight: 20,
+    marginTop: space.xxs,
     color: palette.textMuted,
   },
   tagRow: {
@@ -185,18 +188,18 @@ const styles = StyleSheet.create({
     marginTop: space.sm,
   },
   tag: {
-    paddingHorizontal: space.xs,
-    paddingVertical: 3,
-    borderRadius: radius.sm,
-    backgroundColor: palette.primarySoft,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: palette.yellowSoft,
   },
   tagText: {
-    fontSize: 12,
-    fontWeight: font.medium,
-    color: palette.primaryDark,
+    ...type.caption,
+    fontFamily: fonts.semibold,
+    color: palette.ink,
   },
   moreTags: {
-    fontSize: 12,
+    ...type.caption,
     color: palette.textMuted,
   },
   metaRow: {
@@ -209,18 +212,18 @@ const styles = StyleSheet.create({
   price: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: space.xs,
-    paddingVertical: 3,
-    borderRadius: radius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
     backgroundColor: palette.surfaceMuted,
   },
   pricePaid: {
     backgroundColor: palette.successSoft,
   },
   priceText: {
+    ...type.label,
     marginLeft: space.xxs,
-    fontSize: 13,
-    fontWeight: font.semibold,
+    fontFamily: fonts.bold,
     color: palette.textMuted,
   },
   priceTextPaid: {
@@ -231,8 +234,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   metaText: {
+    ...type.label,
     marginLeft: space.xxs,
-    fontSize: 13,
     color: palette.textMuted,
   },
   footer: {
@@ -248,12 +251,12 @@ const styles = StyleSheet.create({
     marginLeft: space.xs,
   },
   posterName: {
-    fontSize: 13,
-    fontWeight: font.semibold,
+    ...type.label,
+    fontFamily: fonts.semibold,
     color: palette.text,
   },
   date: {
-    fontSize: 12,
+    ...type.caption,
     color: palette.textFaint,
   },
 });

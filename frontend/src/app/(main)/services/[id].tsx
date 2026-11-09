@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ScrollView, StyleSheet, View, Alert } from 'react-native';
-import { Text, Button } from 'react-native-paper';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Text } from 'react-native-paper';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import ScreenWrapper from '../../../components/ScreenWrapper';
 import { getServicePostById, ServicePost } from '../../../services/servicesService';
 import ApplyModal from '../../../components/services/ApplyModal';
@@ -9,15 +9,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../context/AuthContext';
 import { serviceStatusMeta } from '../../../components/services/ServiceCard';
 import {
+  Button,
   Card,
   Avatar,
+  Divider,
+  IconButton,
   StatusPill,
   SectionTitle,
   InfoRow,
   EmptyState,
   LoadingState,
 } from '../../../components/ui';
-import { palette, space, radius, font, shadow } from '../../../constants/theme';
+import { palette, space, radius, type, fonts, shadow, layout } from '../../../constants/theme';
 
 const formatCompensation = (type: ServicePost['compensation_type'], amount?: number) => {
     switch (type) {
@@ -59,29 +62,40 @@ export default function ServiceDetailScreen() {
     fetchData();
   }, [fetchData]);
 
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.navigate('/services' as any);
+  };
+
+  const topBar = (
+    <View style={styles.topBar}>
+      <IconButton icon="chevron-back" label="Go back" onPress={handleBack} />
+    </View>
+  );
+
   const handleApplicationSuccess = () => {
     setIsModalVisible(false);
     Alert.alert(
-      'Application Submitted!',
-      'The poster has been notified. You can track the status in your dashboard.',
+      'Application sent',
+      'You can follow its status under My services.',
       [{ text: 'OK', onPress: () => router.back() }]
     );
   };
 
   if (isLoading) {
     return (
-      <ScreenWrapper style={styles.center}>
-        <Stack.Screen options={{ title: 'Service' }} />
-        <LoadingState label="Loading service" />
+      <ScreenWrapper edges={['top', 'left', 'right']}>
+        {topBar}
+        <LoadingState label="Loading service" style={styles.fill} />
       </ScreenWrapper>
     );
   }
 
   if (!post) {
     return (
-      <ScreenWrapper style={styles.center}>
-        <Stack.Screen options={{ title: 'Service' }} />
-        <EmptyState icon="alert-circle-outline" title="Service not found." />
+      <ScreenWrapper edges={['top', 'left', 'right']}>
+        {topBar}
+        <EmptyState icon="alert-circle-outline" title="Service not found" style={styles.fill} />
       </ScreenWrapper>
     );
   }
@@ -91,8 +105,8 @@ export default function ServiceDetailScreen() {
   const posterName = post.is_anonymous ? 'Anonymous User' : post.poster?.full_name;
 
   return (
-    <ScreenWrapper style={styles.screenWrapper}>
-      <Stack.Screen options={{ title: 'Service' }} />
+    <ScreenWrapper edges={['top', 'left', 'right']}>
+      {topBar}
       <ScrollView
         contentContainerStyle={[styles.container, !isMyPost && styles.containerWithAction]}
         showsVerticalScrollIndicator={false}
@@ -115,9 +129,9 @@ export default function ServiceDetailScreen() {
             label="Compensation"
             value={formatCompensation(post.compensation_type, post.compensation_amount)}
           />
-          <View style={styles.rowDivider} />
+          <Divider style={styles.rowDivider} />
           <InfoRow icon="people-outline" label="Team size" value={`${post.team_size} ${post.team_size === 1 ? "person" : "people"}`} />
-          <View style={styles.rowDivider} />
+          <Divider style={styles.rowDivider} />
           <InfoRow
             icon="calendar-outline"
             label="Deadline"
@@ -147,24 +161,19 @@ export default function ServiceDetailScreen() {
               {isMyPost ? 'This is your post' : 'Service poster'}
             </Text>
           </View>
-          <Ionicons name="person-circle-outline" size={22} color={palette.textFaint} />
+          <Ionicons name="person-circle-outline" size={22} color={palette.textMuted} />
         </Card>
       </ScrollView>
 
       {!isMyPost && (
-        <View style={styles.applyButtonContainer}>
+        <View style={styles.applyButtonContainer} pointerEvents="box-none">
           <Button
-            mode="contained"
+            label="Apply now"
+            variant="dark"
+            icon="send"
             onPress={() => setIsModalVisible(true)}
             style={styles.applyButton}
-            labelStyle={styles.applyButtonLabel}
-            contentStyle={styles.applyButtonContent}
-            buttonColor={palette.primary}
-            textColor={palette.onPrimary}
-            icon="send-outline"
-          >
-            Apply now
-          </Button>
+          />
         </View>
       )}
 
@@ -180,51 +189,52 @@ export default function ServiceDetailScreen() {
   );
 }
 
+const APPLY_BUTTON_HEIGHT = 56;
+
 const styles = StyleSheet.create({
-  screenWrapper: { backgroundColor: palette.background },
-  container: { paddingHorizontal: space.md, paddingTop: space.xs, paddingBottom: space.xxl },
-  containerWithAction: { paddingBottom: 120 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: palette.background },
+  fill: { flex: 1 },
+  topBar: {
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    paddingBottom: space.xs,
+    flexDirection: 'row',
+  },
+  container: {
+    paddingHorizontal: space.lg,
+    paddingTop: space.xs,
+    // Clears the floating tab bar.
+    paddingBottom: layout.tabBarSpace,
+  },
+  // Also clears the floating "Apply now" button that sits above the tab bar.
+  containerWithAction: { paddingBottom: layout.tabBarSpace + APPLY_BUTTON_HEIGHT + space.lg },
   statusPill: { marginBottom: space.sm },
   title: {
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: font.bold,
+    ...type.title1,
     color: palette.text,
-    letterSpacing: -0.2,
   },
-  postedOn: { marginTop: space.xxs, marginBottom: space.lg, fontSize: 13, color: palette.textMuted },
+  postedOn: { ...type.label, marginTop: space.xxs, marginBottom: space.lg, color: palette.textMuted },
   section: { marginBottom: space.md },
   sectionTitleTight: { marginBottom: 0 },
-  description: { fontSize: 15, lineHeight: 23, color: palette.text },
-  rowDivider: { height: StyleSheet.hairlineWidth, backgroundColor: palette.border, marginLeft: 30 },
+  description: { ...type.body, color: palette.text },
+  rowDivider: { marginLeft: 30 },
   tagContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
   tag: {
     paddingHorizontal: space.sm,
-    paddingVertical: space.xxs + 2,
+    paddingVertical: 6,
     borderRadius: radius.pill,
-    backgroundColor: palette.primarySoft,
+    backgroundColor: palette.yellowSoft,
   },
-  tagText: { fontSize: 13, color: palette.primaryDark, fontWeight: font.medium },
+  tagText: { ...type.label, fontFamily: fonts.semibold, color: palette.ink },
   posterHeading: { marginTop: space.xs },
   posterCard: { flexDirection: 'row', alignItems: 'center' },
   posterText: { flex: 1, marginLeft: space.sm },
-  posterName: { fontSize: 16, fontWeight: font.semibold, color: palette.text },
-  metaText: { marginTop: 2, fontSize: 13, color: palette.textMuted },
+  posterName: { ...type.bodyStrong, fontSize: 16, color: palette.text },
+  metaText: { ...type.label, marginTop: 2, color: palette.textMuted },
   applyButtonContainer: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: space.md,
-    paddingTop: space.sm,
-    paddingBottom: space.md,
-    backgroundColor: palette.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: palette.border,
-    ...shadow.raised,
+    left: space.lg,
+    right: space.lg,
+    bottom: layout.tabBarSpace,
   },
-  applyButton: { borderRadius: radius.md },
-  applyButtonLabel: { fontWeight: font.semibold, fontSize: 16 },
-  applyButtonContent: { paddingVertical: space.xxs + 2 },
+  applyButton: { ...shadow.floating },
 });

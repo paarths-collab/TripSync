@@ -12,7 +12,7 @@ import {
 import { Text, Portal, Modal } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Message, getMessages, sendMessage, markMessagesAsRead } from '../../services/chatService';
-import { palette, space, radius, font } from '../../constants/theme';
+import { palette, space, radius, type, fonts, shadow } from '../../constants/theme';
 import { Avatar, EmptyState, IconButton } from '../ui';
 
 interface ChatModalProps {
@@ -47,16 +47,16 @@ export default function ChatModal({
     try {
       const fetchedMessages = await getMessages(token, connectionId);
       setMessages(fetchedMessages);
-      
+
       // Mark messages as read
       await markMessagesAsRead(token, connectionId);
-      
+
       // Scroll to bottom
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
-    } catch (error: any) {
-      console.error('Failed to load messages:', error);
+    } catch {
+      console.error('Failed to load messages');
     }
   }, [token, connectionId]);
 
@@ -66,8 +66,6 @@ export default function ChatModal({
     }
   }, [visible, loadMessages]);
 
-
-
   const handleSendMessage = async () => {
     if (!inputText.trim()) return;
 
@@ -76,12 +74,13 @@ export default function ChatModal({
     setSending(true);
 
     try {
-      // Send via REST API (stores in DB)
-      const newMessage = await sendMessage(token, connectionId, messageContent);
-      
+      // Send via REST API (stores in DB). The API addresses messages by
+      // receiver, so this must be the partner's user id.
+      const newMessage = await sendMessage(token, partnerId, messageContent);
+
       // Add to local state
       setMessages((prev) => [...prev, newMessage]);
-      
+
       // Send via WebSocket for real-time delivery
       if (onSendMessageViaWebSocket) {
         onSendMessageViaWebSocket({
@@ -97,8 +96,8 @@ export default function ChatModal({
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
-    } catch (error: any) {
-      Alert.alert('Error', 'Failed to send message');
+    } catch {
+      Alert.alert("Couldn't send", 'Your message was not sent. Check your connection and try again.');
       setInputText(messageContent); // Restore message
     } finally {
       setSending(false);
@@ -106,7 +105,7 @@ export default function ChatModal({
   };
 
   // Add incoming message from WebSocket
-  const addIncomingMessage = (message: Message) => {
+  const addIncomingMessage = useCallback((message: Message) => {
     setMessages((prev) => {
       // Avoid duplicates
       if (prev.some((m) => m.id === message.id)) {
@@ -114,11 +113,11 @@ export default function ChatModal({
       }
       return [...prev, message];
     });
-    
+
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
-  };
+  }, []);
 
   // Expose method to parent
   useEffect(() => {
@@ -133,23 +132,11 @@ export default function ChatModal({
     const isMyMessage = item.sender_id === currentUserId;
 
     return (
-      <View
-        style={[
-          styles.messageRow,
-          isMyMessage ? styles.myMessageRow : styles.theirMessageRow,
-        ]}
-      >
-        <View
-          style={[
-            styles.messageBubble,
-            isMyMessage ? styles.myMessageBubble : styles.theirMessageBubble,
-          ]}
-        >
-          <Text style={[styles.messageText, isMyMessage && styles.myMessageText]}>
-            {item.content}
-          </Text>
+      <View style={[styles.messageRow, isMyMessage ? styles.myMessageRow : styles.theirMessageRow]}>
+        <View style={[styles.messageBubble, isMyMessage ? styles.myMessageBubble : styles.theirMessageBubble]}>
+          <Text style={styles.messageText}>{item.content}</Text>
         </View>
-        <Text style={[styles.timeText, isMyMessage && styles.myTimeText]}>
+        <Text style={styles.timeText}>
           {new Date(item.created_at).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit',
@@ -164,19 +151,23 @@ export default function ChatModal({
       <Modal
         visible={visible}
         onDismiss={onDismiss}
+        style={styles.modalWrapper}
         contentContainerStyle={styles.modalContainer}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.sheet}
-        >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.sheet}>
           {/* Header */}
-          <View style={[styles.header, { paddingTop: insets.top + space.sm }]}>
-            <IconButton icon="chevron-back" label="Close chat" onPress={onDismiss} />
-            <View style={styles.headerCenter}>
-              <Avatar name={partnerName} size={40} />
+          <View style={[styles.headerWrap, { paddingTop: insets.top + space.xs }]}>
+            <View style={styles.headerCard}>
+              <IconButton
+                icon="chevron-back"
+                label="Close chat"
+                size={44}
+                onPress={onDismiss}
+                style={styles.backButton}
+              />
+              <Avatar name={partnerName} size={44} />
               <View style={styles.headerInfo}>
-                <Text style={styles.headerTitle} numberOfLines={1}>
+                <Text style={styles.headerTitle} numberOfLines={1} accessibilityRole="header">
                   {partnerName}
                 </Text>
                 <Text style={styles.headerSubtitle} numberOfLines={1}>
@@ -197,9 +188,7 @@ export default function ChatModal({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
-            onContentSizeChange={() =>
-              flatListRef.current?.scrollToEnd({ animated: true })
-            }
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
             ListEmptyComponent={
               <EmptyState
                 icon="chatbubbles-outline"
@@ -212,25 +201,28 @@ export default function ChatModal({
 
           {/* Composer */}
           <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, space.sm) }]}>
-            <TextInput
-              placeholder="Message"
-              placeholderTextColor={palette.textFaint}
-              value={inputText}
-              onChangeText={setInputText}
-              style={styles.input}
-              multiline
-              maxLength={500}
-              editable={!sending}
-              accessibilityLabel="Message"
-            />
-            <IconButton
-              icon="send"
-              label="Send message"
-              tone={canSend ? 'primary' : 'neutral'}
-              size={44}
-              onPress={canSend ? handleSendMessage : undefined}
-              style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
-            />
+            <View style={styles.inputPill}>
+              <TextInput
+                placeholder="Message"
+                placeholderTextColor={palette.textMuted}
+                value={inputText}
+                onChangeText={setInputText}
+                style={styles.input}
+                multiline
+                maxLength={500}
+                editable={!sending}
+                accessibilityLabel="Message"
+              />
+            </View>
+            <View style={!canSend && styles.sendDisabled} pointerEvents={canSend ? 'auto' : 'none'}>
+              <IconButton
+                icon="send"
+                label="Send message"
+                tone="dark"
+                size={48}
+                onPress={canSend ? handleSendMessage : undefined}
+              />
+            </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -239,6 +231,11 @@ export default function ChatModal({
 }
 
 const styles = StyleSheet.create({
+  // Full screen: the header and composer pad for the safe area themselves.
+  modalWrapper: {
+    marginTop: 0,
+    marginBottom: 0,
+  },
   modalContainer: {
     flex: 1,
     margin: 0,
@@ -248,34 +245,34 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: palette.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  headerWrap: {
     paddingHorizontal: space.md,
-    paddingBottom: space.sm,
-    backgroundColor: palette.surface,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: palette.border,
+    paddingBottom: space.xs,
   },
-  headerCenter: {
-    flex: 1,
+  headerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: space.sm,
+    padding: space.xs,
+    paddingRight: space.md,
+    backgroundColor: palette.surface,
+    borderRadius: radius.xl,
+    ...shadow.card,
+  },
+  backButton: {
+    backgroundColor: palette.surfaceMuted,
+    marginRight: space.sm,
   },
   headerInfo: {
     flex: 1,
     marginLeft: space.sm,
   },
   headerTitle: {
-    fontSize: 17,
-    fontWeight: font.semibold,
+    ...type.title3,
     color: palette.text,
   },
   headerSubtitle: {
-    fontSize: 12,
+    ...type.caption,
     color: palette.textMuted,
-    marginTop: 2,
   },
   list: {
     flex: 1,
@@ -300,61 +297,54 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     paddingHorizontal: space.md,
-    paddingVertical: space.xs + 2,
+    paddingVertical: space.sm,
     borderRadius: radius.lg,
   },
   myMessageBubble: {
-    backgroundColor: palette.primary,
-    borderBottomRightRadius: radius.sm / 2,
+    backgroundColor: palette.yellowSoft,
+    borderBottomRightRadius: 6,
   },
   theirMessageBubble: {
     backgroundColor: palette.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: palette.border,
-    borderBottomLeftRadius: radius.sm / 2,
+    borderBottomLeftRadius: 6,
+    ...shadow.card,
   },
   messageText: {
-    fontSize: 15,
-    lineHeight: 21,
-    color: palette.text,
-  },
-  myMessageText: {
-    color: palette.onPrimary,
+    ...type.body,
+    color: palette.ink,
   },
   timeText: {
+    ...type.caption,
     fontSize: 11,
     marginTop: space.xxs,
     marginHorizontal: space.xxs,
     color: palette.textFaint,
-  },
-  myTimeText: {
-    textAlign: 'right',
   },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: space.md,
     paddingTop: space.xs,
+    gap: space.xs,
+  },
+  inputPill: {
+    flex: 1,
+    minHeight: 48,
+    justifyContent: 'center',
     backgroundColor: palette.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: palette.border,
+    borderRadius: radius.xl,
+    ...shadow.card,
   },
   input: {
-    flex: 1,
-    minHeight: 44,
     maxHeight: 120,
-    paddingHorizontal: space.md,
-    paddingTop: space.sm,
-    paddingBottom: space.sm,
-    backgroundColor: palette.surfaceMuted,
-    borderRadius: radius.xl,
+    paddingHorizontal: space.lg,
+    paddingTop: 13,
+    paddingBottom: 13,
+    fontFamily: fonts.regular,
     fontSize: 15,
     color: palette.text,
   },
-  sendButton: {
-    marginLeft: space.xs,
-  },
-  sendButtonDisabled: {
-    opacity: 0.6,
+  sendDisabled: {
+    opacity: 0.4,
   },
 });

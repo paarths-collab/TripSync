@@ -1,14 +1,14 @@
 import React, { useState, useCallback } from 'react';
-import { FlatList, StyleSheet, View, ScrollView } from 'react-native';
-import { FAB, Searchbar, Chip, Text, Snackbar } from 'react-native-paper';
+import { FlatList, StyleSheet, View, ScrollView, Pressable } from 'react-native';
+import { Text, Snackbar } from 'react-native-paper';
 import { useFocusEffect, useRouter } from 'expo-router';
 import ScreenWrapper from '../../../components/ScreenWrapper';
 import ServiceCard from '../../../components/services/ServiceCard';
 import { getAllServicePosts, deleteServicePost, ServicePost } from '../../../services/servicesService';
 import { useDebounce } from '../../../hooks/useDebounce';
 import { useAuth } from '../../../context/AuthContext';
-import { EmptyState, LoadingState } from '../../../components/ui';
-import { palette, space, radius, font, shadow } from '../../../constants/theme';
+import { Button, EmptyState, IconButton, LoadingState, ScreenHeader, SearchBar } from '../../../components/ui';
+import { palette, space, radius, type, fonts, shadow, layout } from '../../../constants/theme';
 
 const POPULAR_TAGS = ['Writing', 'Research', 'Python', 'Design', 'Tutoring', 'Marketing', 'Event Help'];
 
@@ -41,7 +41,7 @@ export default function ServicesScreen() {
       setPosts(fetchedPosts);
     } catch (error) {
       console.error(error);
-      showSnackbar("Failed to load services. Please try again.", "error");
+      showSnackbar("Couldn't load services. Please try again.", 'error');
     } finally {
       setIsLoading(false);
       setHasLoaded(true);
@@ -60,51 +60,60 @@ export default function ServicesScreen() {
 
   const handleDeletePost = async (postId: number) => {
     if (!token) {
-      showSnackbar("You must be logged in to delete a post.", "error");
+      showSnackbar('You must be logged in to delete a post.', 'error');
       return;
     }
 
     try {
       await deleteServicePost(token, postId);
       setPosts(currentPosts => currentPosts.filter(post => post.id !== postId));
-      showSnackbar("✓ Post deleted successfully!", "success");
+      showSnackbar('Post deleted.', 'success');
     } catch (error: any) {
-      showSnackbar(`Deletion failed: ${error.message}`, "error");
+      showSnackbar(`Couldn't delete the post: ${error.message}`, 'error');
     }
   };
 
+  const header = (
+    <ScreenHeader
+      title="Services"
+      subtitle="Get help with projects, or lend a hand"
+      right={
+        <IconButton
+          icon="briefcase-outline"
+          label="My services"
+          onPress={() => router.push('/services/dashboard' as any)}
+        />
+      }
+    />
+  );
+
   const ListHeader = (
-    <View style={styles.header}>
-      <Searchbar
-        placeholder="Search by title or skill..."
-        onChangeText={setSearchQuery}
+    <View style={styles.listHeader}>
+      <SearchBar
+        placeholder="Search by title or skill"
         value={searchQuery}
-        style={styles.searchbar}
-        inputStyle={styles.searchInput}
-        iconColor={palette.textMuted}
-        placeholderTextColor={palette.textFaint}
-        elevation={0}
+        onChangeText={setSearchQuery}
       />
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.chipContainer}
         style={styles.chipScroll}
       >
         {POPULAR_TAGS.map(tag => {
           const isSelected = selectedTags.includes(tag);
           return (
-            <Chip
+            <Pressable
               key={tag}
-              mode="flat"
-              selected={isSelected}
-              showSelectedCheck={false}
               onPress={() => handleTagPress(tag)}
-              style={[styles.chip, isSelected && styles.chipSelected]}
-              textStyle={[styles.chipText, isSelected && styles.chipTextSelected]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: isSelected }}
+              accessibilityLabel={`Filter by ${tag}`}
+              style={({ pressed }) => [styles.chip, isSelected && styles.chipSelected, pressed && styles.chipPressed]}
             >
-              {tag}
-            </Chip>
+              <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{tag}</Text>
+            </Pressable>
           );
         })}
       </ScrollView>
@@ -113,16 +122,18 @@ export default function ServicesScreen() {
 
   if (isLoading && !hasLoaded) {
     return (
-      <ScreenWrapper style={styles.center}>
-        <LoadingState label="Loading services" />
+      <ScreenWrapper edges={['top', 'left', 'right']}>
+        {header}
+        <LoadingState label="Loading services" style={styles.fill} />
       </ScreenWrapper>
     );
   }
 
   return (
-    <ScreenWrapper>
+    <ScreenWrapper edges={['top', 'left', 'right']}>
+      {header}
       <FlatList
-        style={styles.list}
+        style={styles.fill}
         data={posts}
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
@@ -141,64 +152,71 @@ export default function ServicesScreen() {
         }
       />
 
-      <FAB
-        icon="plus"
+      <Button
         label="New service"
-        color={palette.onPrimary}
-        style={styles.fab}
+        icon="add"
+        variant="primary"
+        size="md"
+        fullWidth={false}
         onPress={() => router.push('/services/create' as any)}
-        aria-label="Create a new service post"
+        accessibilityLabel="Create a new service post"
+        style={styles.fab}
       />
 
       <Snackbar
         visible={snackbarVisible}
         onDismiss={hideSnackbar}
         duration={3000}
+        wrapperStyle={styles.snackbarWrapper}
         style={[
           styles.snackbar,
-          { backgroundColor: snackbarType === 'success' ? palette.success : palette.danger },
+          { backgroundColor: snackbarType === 'success' ? palette.ink : palette.dangerSolid },
         ]}
       >
-        <Text style={styles.snackbarText}>
-          {snackbarMessage}
-        </Text>
+        <Text style={styles.snackbarText}>{snackbarMessage}</Text>
       </Snackbar>
     </ScreenWrapper>
   );
 }
 
+const FAB_HEIGHT = 48;
+
 const styles = StyleSheet.create({
-  list: { flex: 1, backgroundColor: palette.background },
-  header: { paddingTop: space.xs, backgroundColor: palette.background },
-  searchbar: {
-    backgroundColor: palette.surface,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: palette.border,
-    height: 48,
+  fill: { flex: 1 },
+  listHeader: { paddingTop: space.xxs },
+  chipScroll: { marginHorizontal: -space.lg },
+  chipContainer: {
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    paddingBottom: space.md,
+    gap: space.xs,
   },
-  searchInput: { fontSize: 15, color: palette.text, minHeight: 0 },
-  chipScroll: { marginHorizontal: -space.md },
-  chipContainer: { paddingHorizontal: space.md, paddingTop: space.sm, paddingBottom: space.md, gap: space.xs },
   chip: {
-    backgroundColor: palette.surface,
+    height: 36,
+    paddingHorizontal: space.md,
     borderRadius: radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: palette.border,
+    backgroundColor: palette.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
   },
-  chipSelected: { backgroundColor: palette.primary, borderColor: palette.primary },
-  chipText: { color: palette.text, fontWeight: font.medium },
-  chipTextSelected: { color: palette.onPrimary, fontWeight: font.semibold },
-  listContent: { paddingHorizontal: space.md, paddingBottom: 96, flexGrow: 1 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: palette.background },
+  chipSelected: { backgroundColor: palette.yellow },
+  chipPressed: { opacity: 0.85 },
+  chipText: { ...type.label, fontFamily: fonts.medium, color: palette.ink },
+  chipTextSelected: { fontFamily: fonts.semibold, color: palette.onYellow },
+  listContent: {
+    paddingHorizontal: space.lg,
+    // Room for the floating "New service" button above the floating tab bar.
+    paddingBottom: layout.tabBarSpace + FAB_HEIGHT + space.lg,
+    flexGrow: 1,
+  },
   fab: {
     position: 'absolute',
-    right: space.md,
-    bottom: space.md,
-    backgroundColor: palette.primary,
-    borderRadius: radius.lg,
-    ...shadow.raised,
+    right: space.lg,
+    bottom: layout.tabBarSpace,
+    ...shadow.floating,
   },
+  snackbarWrapper: { bottom: layout.tabBarSpace },
   snackbar: { borderRadius: radius.md },
-  snackbarText: { color: palette.onPrimary, fontWeight: font.semibold },
+  snackbarText: { ...type.label, fontFamily: fonts.semibold, color: palette.onPrimary },
 });

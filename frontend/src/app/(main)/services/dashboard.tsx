@@ -1,14 +1,30 @@
 import React, { useState, useCallback } from 'react';
 import { View, StyleSheet, FlatList, Alert } from 'react-native';
-import { Text, SegmentedButtons, Button } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import { useFocusEffect, useRouter } from 'expo-router';
 import ScreenWrapper from '../../../components/ScreenWrapper';
 import { useAuth } from '../../../context/AuthContext';
 import { getMyServicePosts, getMyApplications, ServicePost, ServiceApplication } from '../../../services/servicesService';
 import { Ionicons } from '@expo/vector-icons';
 import { serviceStatusMeta } from '../../../components/services/ServiceCard';
-import { Card, StatusPill, SectionTitle, EmptyState, LoadingState } from '../../../components/ui';
-import { palette, space, radius, font, Tone } from '../../../constants/theme';
+import {
+    Button,
+    Card,
+    StatusPill,
+    SectionTitle,
+    EmptyState,
+    LoadingState,
+    ScreenHeader,
+    SegmentedControl,
+} from '../../../components/ui';
+import { palette, space, radius, type, fonts, layout, Tone } from '../../../constants/theme';
+
+type DashboardTab = 'my-posts' | 'my-applications';
+
+const TAB_OPTIONS: { value: DashboardTab; label: string }[] = [
+    { value: 'my-posts', label: 'My posts' },
+    { value: 'my-applications', label: 'My applications' },
+];
 
 const applicationStatusMeta: Record<ServiceApplication['status'], { label: string; tone: Tone; icon: 'time-outline' | 'checkmark-circle' | 'close-circle' }> = {
     pending: { label: 'Pending', tone: 'warning', icon: 'time-outline' },
@@ -35,16 +51,13 @@ const MyPostCard = ({ post }: { post: ServicePost; index: number }) => {
                 <Text style={styles.cardBody} numberOfLines={2}>{post.description}</Text>
             )}
             <Button
-                mode="contained-tonal"
-                icon="account-group-outline"
+                label="View applicants"
+                variant="dark"
+                size="md"
+                icon="people-outline"
                 onPress={() => router.push(`/(main)/services/applicants/${post.id}` as any)}
                 style={styles.cardButton}
-                buttonColor={palette.primarySoft}
-                textColor={palette.primaryDark}
-                labelStyle={styles.cardButtonLabel}
-            >
-                View applicants
-            </Button>
+            />
         </Card>
     );
 };
@@ -69,7 +82,7 @@ const MyApplicationCard = ({ application }: { application: ServiceApplication; i
         >
             <View style={styles.cardTop}>
                 <StatusPill label={meta.label} tone={meta.tone} icon={meta.icon} />
-                <Ionicons name="chevron-forward" size={18} color={palette.textFaint} />
+                <Ionicons name="chevron-forward" size={18} color={palette.textMuted} />
             </View>
             <Text style={styles.cardTitle} numberOfLines={2}>{application.service_post.title}</Text>
             <View style={[styles.metaItem, styles.appliedOn]}>
@@ -89,8 +102,9 @@ const MyApplicationCard = ({ application }: { application: ServiceApplication; i
 
 
 export default function ServicesDashboard() {
+  const router = useRouter();
   const { token } = useAuth();
-  const [tab, setTab] = useState<'my-posts' | 'my-applications'>('my-posts');
+  const [tab, setTab] = useState<DashboardTab>('my-posts');
   const [myPosts, setMyPosts] = useState<ServicePost[]>([]);
   const [myApplications, setMyApplications] = useState<ServiceApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -185,32 +199,16 @@ export default function ServicesDashboard() {
     return null;
   };
 
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.navigate('/services' as any);
+  };
+
   return (
-    <ScreenWrapper style={styles.container}>
+    <ScreenWrapper edges={['top', 'left', 'right']}>
+      <ScreenHeader title="My services" onBack={handleBack} />
       <View style={styles.segmentContainer}>
-        <SegmentedButtons
-          value={tab}
-          onValueChange={(value) => setTab(value as any)}
-          buttons={[
-            {
-              value: 'my-posts',
-              label: 'My posts',
-              icon: 'post-outline',
-              style: [styles.segment, tab === 'my-posts' && styles.segmentActive],
-              checkedColor: palette.primaryDark,
-              uncheckedColor: palette.textMuted,
-            },
-            {
-              value: 'my-applications',
-              label: 'My applications',
-              icon: 'file-check-outline',
-              style: [styles.segment, tab === 'my-applications' && styles.segmentActive],
-              checkedColor: palette.primaryDark,
-              uncheckedColor: palette.textMuted,
-            },
-          ]}
-          density="regular"
-        />
+        <SegmentedControl options={TAB_OPTIONS} value={tab} onChange={setTab} />
       </View>
       {renderContent()}
     </ScreenWrapper>
@@ -218,25 +216,17 @@ export default function ServicesDashboard() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: palette.background },
   fill: { flex: 1 },
   segmentContainer: {
-    paddingHorizontal: space.md,
+    paddingHorizontal: space.lg,
     paddingTop: space.xs,
-    paddingBottom: space.sm,
-    backgroundColor: palette.background,
-  },
-  segment: {
-    borderColor: palette.border,
-    backgroundColor: palette.surface,
-  },
-  segmentActive: {
-    backgroundColor: palette.primarySoft,
+    paddingBottom: space.md,
   },
   listContent: {
-    paddingHorizontal: space.md,
-    paddingTop: space.xs,
-    paddingBottom: space.xxl,
+    paddingHorizontal: space.lg,
+    paddingTop: space.xxs,
+    // Clears the floating tab bar.
+    paddingBottom: layout.tabBarSpace,
     flexGrow: 1,
   },
   card: {
@@ -249,31 +239,26 @@ const styles = StyleSheet.create({
     marginBottom: space.xs,
   },
   cardTitle: {
-    fontSize: 17,
-    lineHeight: 23,
-    fontWeight: font.semibold,
+    ...type.title3,
     color: palette.text,
   },
   cardBody: {
-    marginTop: space.xxs,
+    ...type.body,
     fontSize: 14,
     lineHeight: 20,
+    marginTop: space.xxs,
     color: palette.textMuted,
   },
   cardButton: {
     marginTop: space.md,
-    borderRadius: radius.md,
-  },
-  cardButtonLabel: {
-    fontWeight: font.semibold,
   },
   metaItem: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   metaText: {
+    ...type.label,
     marginLeft: space.xxs,
-    fontSize: 13,
     color: palette.textMuted,
   },
   appliedOn: {
@@ -284,14 +269,15 @@ const styles = StyleSheet.create({
     paddingVertical: space.xs,
     paddingHorizontal: space.sm,
     borderLeftWidth: 3,
-    borderLeftColor: palette.primarySoft,
+    borderLeftColor: palette.yellow,
     backgroundColor: palette.surfaceMuted,
     borderRadius: radius.sm,
   },
   quoteText: {
+    ...type.body,
     fontSize: 14,
     lineHeight: 20,
     color: palette.textMuted,
-    fontStyle: 'italic',
+    fontFamily: fonts.regular,
   },
 });

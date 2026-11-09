@@ -13,6 +13,8 @@ export interface UserProfile {
   bio?: string;
   year_of_study?: string;
   has_resume: boolean;
+  /** True once the college email has been confirmed. Missing or null means unknown. */
+  email_verified?: boolean | null;
 }
 
 // This interface matches the ProfileUpdate schema
@@ -41,36 +43,5 @@ export const updateMyProfile = async (profileData: ProfileUpdateData): Promise<U
     } catch (error: any) {
         console.error('Update profile failed:', error.response?.data || error.message);
         throw new Error(error.response?.data?.detail || 'Failed to update profile.');
-    }
-};
-
-/**
- * Uploads a profile image to the backend.
- * @param uri The local file URI of the image to upload.
- * @returns The updated user profile.
- */
-export const uploadProfileImage = async (uri: string): Promise<UserProfile> => {
-    // FormData is a special object for sending files in HTTP requests.
-    const formData = new FormData();
-    
-    // Append the file to the form data.
-    // The field name 'file' MUST match the parameter name in our FastAPI endpoint.
-    formData.append('file', {
-        uri,
-        name: `profile_${Date.now()}.jpg`, // Create a unique filename
-        type: 'image/jpeg',
-    } as any); // The 'as any' cast is needed because React Native's FormData type is slightly different
-
-    try {
-        const response = await apiClient.post('/profile/me/image', formData, {
-            headers: {
-                // This header is crucial for file uploads
-                'Content-Type': 'multipart/form-data',
-            },
-        });
-        return response.data;
-    } catch (error: any) {
-        console.error('Image upload failed:', error.response?.data || error.message);
-        throw new Error(error.response?.data?.detail || 'Failed to upload image.');
     }
 };

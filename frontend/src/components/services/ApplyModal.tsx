@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { Modal, Portal, Text, Button, TextInput } from 'react-native-paper';
+import { Modal, Portal, Text } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 import { applyForService, ServiceApplicationCreateData, ServicePost } from '../../services/servicesService';
-import { IconBadge } from '../ui';
-import { palette, space, radius, font, shadow } from '../../constants/theme';
+import { Button, IconBadge, TextField } from '../ui';
+import { palette, space, radius, type, shadow } from '../../constants/theme';
 
 interface ApplyModalProps {
   visible: boolean;
@@ -15,6 +16,7 @@ interface ApplyModalProps {
 
 export default function ApplyModal({ visible, onDismiss, post, onApplicationSuccess }: ApplyModalProps) {
   const { token } = useAuth();
+  const insets = useSafeAreaInsets();
   const [coverLetter, setCoverLetter] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -54,7 +56,7 @@ export default function ApplyModal({ visible, onDismiss, post, onApplicationSucc
         visible={visible}
         onDismiss={handleDismiss}
         style={styles.modal}
-        contentContainerStyle={styles.container}
+        contentContainerStyle={[styles.container, { paddingBottom: Math.max(insets.bottom, space.md) + space.md }]}
       >
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.handle} />
@@ -72,42 +74,32 @@ export default function ApplyModal({ visible, onDismiss, post, onApplicationSucc
               : "You can include an optional message to the poster."}
           </Text>
 
-          <TextInput
+          <TextField
             label="Your message"
             value={coverLetter}
             onChangeText={setCoverLetter}
-            mode="outlined"
             multiline
             numberOfLines={6}
             style={styles.input}
-            outlineStyle={styles.inputOutline}
-            outlineColor={palette.border}
-            activeOutlineColor={palette.primary}
-            placeholder="Introduce yourself and your relevant skills..."
+            containerStyle={styles.inputContainer}
+            placeholder="Introduce yourself and your relevant skills…"
           />
 
           <Button
-            mode="contained"
+            label="Send application"
+            variant="dark"
+            icon="send"
             onPress={handleSubmit}
             loading={isLoading}
-            disabled={isLoading}
-            style={styles.button}
-            contentStyle={styles.buttonContent}
-            labelStyle={styles.buttonLabel}
-            buttonColor={palette.primary}
-            textColor={palette.onPrimary}
-            icon="send-outline"
-          >
-            Submit application
-          </Button>
+          />
           <Button
+            label="Cancel"
+            variant="ghost"
+            size="md"
             onPress={handleDismiss}
             disabled={isLoading}
             style={styles.cancelButton}
-            textColor={palette.textMuted}
-          >
-            Cancel
-          </Button>
+          />
         </KeyboardAvoidingView>
       </Modal>
     </Portal>
@@ -117,21 +109,23 @@ export default function ApplyModal({ visible, onDismiss, post, onApplicationSucc
 const styles = StyleSheet.create({
   modal: {
     justifyContent: 'flex-end',
+    // Paper insets the modal by the safe area; let the sheet reach the bottom edge
+    // and pad its content instead.
+    marginBottom: 0,
   },
   container: {
     backgroundColor: palette.surface,
     paddingHorizontal: space.lg,
-    paddingTop: space.sm,
-    paddingBottom: space.xxl,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+    paddingTop: space.xs,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
     ...shadow.raised,
   },
   handle: {
     alignSelf: 'center',
     width: 40,
-    height: 4,
-    borderRadius: radius.pill,
+    height: 5,
+    borderRadius: 3,
     backgroundColor: palette.border,
     marginBottom: space.md,
   },
@@ -145,41 +139,29 @@ const styles = StyleSheet.create({
     marginLeft: space.sm,
   },
   title: {
-    fontSize: 20,
-    fontWeight: font.bold,
+    ...type.title2,
     color: palette.text,
   },
   postTitle: {
+    ...type.label,
     marginTop: 2,
-    fontSize: 14,
     color: palette.textMuted,
   },
   subtitle: {
-    marginBottom: space.md,
+    ...type.body,
     fontSize: 14,
     lineHeight: 20,
+    marginBottom: space.md,
     color: palette.textMuted,
   },
-  input: {
+  inputContainer: {
     marginBottom: space.lg,
-    backgroundColor: palette.surface,
-    minHeight: 132,
   },
-  inputOutline: {
-    borderRadius: radius.md,
-  },
-  button: {
-    borderRadius: radius.md,
-  },
-  buttonContent: {
-    paddingVertical: space.xxs + 2,
-  },
-  buttonLabel: {
-    fontSize: 16,
-    fontWeight: font.semibold,
+  input: {
+    minHeight: 120,
+    textAlignVertical: 'top',
   },
   cancelButton: {
     marginTop: space.xs,
-    borderRadius: radius.md,
   },
 });

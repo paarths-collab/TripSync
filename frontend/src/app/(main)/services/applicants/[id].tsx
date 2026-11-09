@@ -1,16 +1,16 @@
 import React, { useState, useCallback } from 'react';
 import { StyleSheet, FlatList } from 'react-native';
-import { Snackbar } from 'react-native-paper';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Snackbar, Text } from 'react-native-paper';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import ScreenWrapper from '../../../../components/ScreenWrapper';
 import { useAuth } from '../../../../context/AuthContext';
-// --- IMPORT THE NEW UPDATE FUNCTION ---
 import { getApplicationsForPost, ServiceApplication, updateApplicationStatus } from '../../../../services/servicesService';
 import ApplicantCard from '../../../../components/services/ApplicantCard';
-import { EmptyState, LoadingState, SectionTitle, StatusPill } from '../../../../components/ui';
-import { palette, space, radius } from '../../../../constants/theme';
+import { EmptyState, LoadingState, ScreenHeader, SectionTitle, StatusPill } from '../../../../components/ui';
+import { palette, space, radius, type, fonts, layout } from '../../../../constants/theme';
 
 export default function ViewApplicantsScreen() {
+    const router = useRouter();
     const { id } = useLocalSearchParams<{ id: string }>();
     const { token } = useAuth();
     
@@ -55,7 +55,7 @@ export default function ViewApplicantsScreen() {
             
             setSnackbar({ 
                 visible: true, 
-                message: `Application ${status === 'accepted' ? 'accepted' : 'rejected'} successfully!` 
+                message: `Application ${status === 'accepted' ? 'accepted' : 'rejected'}.` 
             });
         } catch (error: any) {
             setSnackbar({ 
@@ -67,10 +67,18 @@ export default function ViewApplicantsScreen() {
         }
     };
     
+    const handleBack = () => {
+        if (router.canGoBack()) router.back();
+        else router.navigate('/services/dashboard' as any);
+    };
+
+    const header = <ScreenHeader title="Applicants" onBack={handleBack} />;
+
     if (isLoading) {
         return (
-            <ScreenWrapper style={styles.center}>
-                <LoadingState label="Loading applicants" />
+            <ScreenWrapper edges={['top', 'left', 'right']}>
+                {header}
+                <LoadingState label="Loading applicants" style={styles.fill} />
             </ScreenWrapper>
         );
     }
@@ -78,7 +86,8 @@ export default function ViewApplicantsScreen() {
     const pendingCount = applications.filter(app => app.status === 'pending').length;
 
     return (
-        <ScreenWrapper style={styles.container}>
+        <ScreenWrapper edges={['top', 'left', 'right']}>
+            {header}
             <FlatList
                 data={applications}
                 keyExtractor={item => item.id.toString()}
@@ -116,17 +125,25 @@ export default function ViewApplicantsScreen() {
                 visible={snackbar.visible}
                 onDismiss={() => setSnackbar({ ...snackbar, visible: false })}
                 duration={3000}
+                wrapperStyle={styles.snackbarWrapper}
                 style={styles.snackbar}
             >
-                {snackbar.message}
+                <Text style={styles.snackbarText}>{snackbar.message}</Text>
             </Snackbar>
         </ScreenWrapper>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: palette.background },
-    listContent: { paddingHorizontal: space.md, paddingTop: space.xs, paddingBottom: space.xxl, flexGrow: 1 },
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: palette.background },
+    fill: { flex: 1 },
+    listContent: {
+        paddingHorizontal: space.lg,
+        paddingTop: space.xs,
+        // Clears the floating tab bar.
+        paddingBottom: layout.tabBarSpace,
+        flexGrow: 1,
+    },
+    snackbarWrapper: { bottom: layout.tabBarSpace },
     snackbar: { borderRadius: radius.md, backgroundColor: palette.ink },
+    snackbarText: { ...type.label, fontFamily: fonts.semibold, color: palette.onPrimary },
 });
