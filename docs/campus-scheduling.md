@@ -572,12 +572,12 @@ Relative to `main`, this branch also contains earlier, non-campus changes to poo
 
 ### 7.2 Schema creation
 
-No migration framework is used. There is no Alembic.
+Schema changes are managed with Alembic (`backend/migrations/`).
 
-- Startup (`app/main.py`, lifespan) calls `Base.metadata.create_all(bind=engine)`. The demo seed script calls it too.
-- `create_all` creates tables that do not exist. An existing database gains the 11 campus tables listed in section 2.
-- No existing table is altered on this branch. The campus models are in `campus_model.py`. No existing model file changed.
-- Schema changes to campus tables after this point need a migration, because `create_all` will not add columns to existing tables.
+- `0001_baseline` is the schema the old `create_all` startup built, including the 11 campus tables listed in section 2. `0002_auth_verification` adds the sign-up verification columns and the `email_codes` table.
+- PostgreSQL deployments run `alembic upgrade head`. A database created earlier by `create_all` is adopted with `alembic stamp 0001_baseline` and then `alembic upgrade head`.
+- Startup only calls `create_all` when `DB_AUTO_CREATE` is on, which by default means SQLite URLs (local development and tests). On an empty database it also stamps the Alembic head.
+- Any later change to campus tables needs a new Alembic revision; `tests/test_migrations.py` fails if the migrations and the models drift apart.
 
 ### 7.3 Environment variables
 

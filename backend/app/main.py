@@ -1,14 +1,16 @@
 # backend/app/main.py
 from fastapi import FastAPI
 from app.router import router
-from app.db.database import Base, engine
+from app.core.config import settings
+from app.db.database import engine
 from app.db import database as db_module
-from app.services import campus_outbox
+from app.db import schema as db_schema
+from app.services import campus_outbox, college_service
 from contextlib import asynccontextmanager
 import asyncio
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from app.models import user_model, pooling_model, profile_model, service_model, message_model, conversation_model, campus_model  # noqa: F401
+from app.models import load_all_models
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -63,9 +65,45 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 # Scrub API keys from every record written by any handler configured here.
 for _handler in (file_handler, error_handler, console_handler):
     _handler.addFilter(RedactSecretsFilter())
-# This function will create the database tables.
+load_all_models()
+
+
 def create_db_and_tables():
-    Base.metadata.create_all(bind=engine)
+    """Development convenience: create missing tables (see app.db.schema)."""
+    db_schema.auto_create_schema(engine)
+
+
+def prepare_database() -> None:
+    """Startup database work: optional create_all, then upsert the college list."""
+    if settings.db_auto_create:
+        create_db_and_tables()
+        logger.info("Database tables created (DB_AUTO_CREATE)")
+    else:
+        logger.info("DB_AUTO_CREATE is off; expecting `alembic upgrade head` to have run")
+    try:
+        db = db_module.SessionLocal()
+        try:
+            college_service.sync_colleges(db)
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("Could not sync colleges; is the database migrated (alembic upgrade head)?")
+
+
+def cors_options(allow_origins: str) -> dict:
+    """CORSMiddleware options from ALLOW_ORIGINS ("*" or a comma-separated list).
+
+    With "*" credentials are disabled (browsers reject a wildcard with credentials,
+    and the API authenticates with bearer tokens, not cookies).
+    """
+    origins = [o.strip() for o in (allow_origins or "").split(",") if o.strip()]
+    wildcard = "*" in origins
+    return {
+        "allow_origins": ["*"] if wildcard else origins,
+        "allow_credentials": not wildcard and bool(origins),
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
 
 # --- Outbox poller -----------------------------------------------------------
 # Retries party-event pushes that could not be delivered at commit time. It is
@@ -112,9 +150,8 @@ async def run_outbox_poller(interval: float) -> None:
 # The code within this "startup" event will run once, before the app starts receiving requests.
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Starting up...")
-    create_db_and_tables()
-    print("Database tables created.")
+    logger.info("Starting up...")
+    prepare_database()
     poller = None
     interval = outbox_poll_seconds()
     if interval > 0:
@@ -128,21 +165,15 @@ async def lifespan(app: FastAPI):
                 await poller
             except asyncio.CancelledError:
                 pass
-        print("Shutting down...")
+        logger.info("Shutting down...")
 
 # Create the FastAPI app instance with the lifespan event handler
-app = FastAPI(title="TripSync API", lifespan=lifespan)
+app = FastAPI(title=f"{settings.APP_NAME} API", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (GET, POST, OPTIONS, etc.)
-    allow_headers=["*"],  # Allows all headers
-)
+app.add_middleware(CORSMiddleware, **cors_options(settings.ALLOW_ORIGINS))
 # Include the main router
 app.include_router(router, prefix="/api")
 
 @app.get("/")
 def read_root():
-    return {"message": "TripSync API is running!"}
+    return {"message": f"{settings.APP_NAME} API is running!"}

@@ -1,5 +1,7 @@
 # backend/app/schemas/profile_schema.py
 
+from datetime import date
+
 from pydantic import BaseModel, Field, HttpUrl
 from typing import Optional, Dict, Any
 
@@ -9,6 +11,9 @@ class Profile(BaseModel):
     id: int
     full_name: str
     email: str
+    email_verified: bool = False
+    # Serialised as "YYYY-MM-DD"; null for accounts created before it was collected.
+    date_of_birth: Optional[date] = None
     college_name: str
 
     # Profile details

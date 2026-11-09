@@ -30,6 +30,8 @@ def get_user_profile(db: Session, user: user_model.User) -> dict:
         "id": user_with_details.id,
         "full_name": user_with_details.full_name,
         "email": user_with_details.email,
+        "email_verified": user_with_details.email_verified_at is not None,
+        "date_of_birth": user_with_details.date_of_birth,
         "college_name": user_with_details.college.name if user_with_details.college else "N/A",
         "username": user_with_details.profile.username,
         "phone_number": user_with_details.profile.phone_number,

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
 
+from app.core import rate_limit
 from app.db.database import get_db
 from app.services import auth_service, message_service, conversation_service
 from app.schemas import message_schema
@@ -11,7 +12,11 @@ from app.models import user_model
 
 router = APIRouter()
 
-@router.post("/messages", response_model=message_schema.Message)
+@router.post(
+    "/messages",
+    response_model=message_schema.Message,
+    dependencies=[Depends(rate_limit.limit_by_user("chat_message_user"))],
+)
 async def send_message(
     message_data: message_schema.MessageCreate,
     db: Session = Depends(get_db),

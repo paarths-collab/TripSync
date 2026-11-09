@@ -19,3 +19,27 @@ class RouteDetails(BaseModel):
 class RouteResponse(BaseModel):
     status: str
     route: RouteDetails | None = None
+
+# --- Places proxy (GET /map/places/...) ---
+class PlacePrediction(BaseModel):
+    place_id: str
+    description: str
+    main_text: str
+    secondary_text: str
+
+
+class AutocompleteResponse(BaseModel):
+    predictions: List[PlacePrediction]
+
+
+class PlaceDetailsResponse(BaseModel):
+    place_id: str
+    name: str
+    address: str
+    lat: float
+    lng: float
+
+
+class ReverseGeocodeResponse(BaseModel):
+    address: str
+    name: str

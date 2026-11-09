@@ -34,7 +34,7 @@ def test_idle_sockets_release_database_connections(path, authorized, tmp_path):
                                  hashed_password="unused") for i in range(2)]
         db.add_all(users)
         db.flush()
-        receiver = users[1].id
+        sender, receiver = users[0].id, users[1].id
         if authorized:
             requests = [pm.PoolingRequest(user_id=u.id, status=pm.PoolingRequestStatus.CONNECTED,
                         start_latitude=19, start_longitude=72, destination_latitude=20,
@@ -44,7 +44,7 @@ def test_idle_sockets_release_database_connections(path, authorized, tmp_path):
             db.add(pm.PoolingConnection(sender_request_id=requests[0].id,
                    receiver_request_id=requests[1].id, status=pm.PoolingConnectionStatus.APPROVED))
         db.commit()
-    token = auth_service.create_access_token({"sub": "socket0@example.test"})
+    token = auth_service.create_access_token({"sub": str(sender), "tv": 0})
     def dependency():
         with sf() as db:
             yield db
@@ -116,19 +116,25 @@ def test_old_suggestion_requires_current_deadline_ack(world, monkeypatch):
 
 @pytest.mark.parametrize("password", ["x" * 73, "é" * 37])
 def test_long_passwords_are_controlled_client_errors(password, client, college, make_user):
-    response = client.post("/api/auth/register", json={"email": "long@example.com",
-        "full_name": "Long Example", "college_name": "DJSCE", "password": password})
+    response = client.post("/api/auth/register", json={"email": "long@djsce.ac.in",
+        "full_name": "Long Example", "college_name": "DJSCE", "password": password,
+        "date_of_birth": "2000-01-01"})
     assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "weak_password"
     make_user("login@example.test", "Login Example", college)
     assert client.post("/api/auth/token", data={"username": "login@example.test", "password": password}).status_code == 401
 
 
 @pytest.mark.parametrize("password", ["x" * 72, "é" * 36])
-def test_password_byte_limit_is_inclusive(password, client):
-    response = client.post("/api/auth/register", json={"email": "limit@example.com",
-        "full_name": "Limit Example", "college_name": "DJSCE", "password": password})
+def test_password_byte_limit_is_inclusive(password, client, sent_emails):
+    response = client.post("/api/auth/register", json={"email": "limit@djsce.ac.in",
+        "full_name": "Limit Example", "college_name": "DJSCE", "password": password,
+        "date_of_birth": "2000-01-01"})
     assert response.status_code == 201
-    assert client.post("/api/auth/token", data={"username": "limit@example.com", "password": password}).status_code == 200
+    code = sent_emails.last_code("limit@djsce.ac.in")
+    assert client.post("/api/auth/verify-email/confirm",
+                       json={"email": "limit@djsce.ac.in", "code": code}).status_code == 200
+    assert client.post("/api/auth/token", data={"username": "limit@djsce.ac.in", "password": password}).status_code == 200
 
 
 def test_bad_password_hash_fails_authentication():

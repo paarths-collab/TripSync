@@ -19,6 +19,22 @@ os.environ["JWT_ALGORITHM"] = "HS256"
 os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"] = "60"
 os.environ["OLA_MAPS_API_KEY"] = "test-ola-key-SENTINEL"
 os.environ.pop("OLA_MAPS_PROXY", None)
+# Settings that also exist in a developer's backend/.env: pin them so tests are
+# deterministic. Rate limits are off here; tests that exercise them turn them on.
+os.environ["APP_NAME"] = "TripSync"
+os.environ["COLLEGE_EMAIL_DOMAINS"] = "{}"
+os.environ["EMAIL_BACKEND"] = "console"
+os.environ["RATE_LIMIT_ENABLED"] = "false"
+os.environ["TRUSTED_PROXY"] = "false"
+os.environ["TRUSTED_PROXY_HOPS"] = "1"
+os.environ["PLACES_CACHE_TTL_SECONDS"] = "600"
+os.environ["ROUTE_CACHE_TTL_SECONDS"] = "120"
+os.environ["MAPS_CACHE_MAX_ENTRIES"] = "1000"
+os.environ.pop("DB_AUTO_CREATE", None)
+for _name in [k for k in os.environ if k.startswith("RATE_LIMIT_") and k != "RATE_LIMIT_ENABLED"]:
+    os.environ.pop(_name)
+
+from datetime import date, datetime  # noqa: E402
 
 import bcrypt  # noqa: E402
 import httpx  # noqa: E402
@@ -38,15 +54,39 @@ def _jsonb_as_json_on_sqlite(type_, compiler, **kw):
 
 
 from app import main as app_main  # noqa: E402
+from app.core import rate_limit  # noqa: E402
 from app.core.ws_manager import manager  # noqa: E402
 from app.db import database as app_database  # noqa: E402
 from app.db.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import profile_model, user_model  # noqa: E402
-from app.services import auth_service, pooling_service  # noqa: E402
+from app.services import auth_service, email_service, map_service, pooling_service  # noqa: E402
 
 TEST_PASSWORD = "test-password-not-real"
 SENTINEL_OLA_KEY = os.environ["OLA_MAPS_API_KEY"]
+TEST_COLLEGE_DOMAIN = "djsce.ac.in"
+
+
+# --------------------------------------------------------------------------
+# Process-wide state: email, rate limits, caches
+# --------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def sent_emails():
+    """Every test sends email into an in-memory fake; yields it (.messages, .last_code())."""
+    fake = email_service.MemoryEmailSender()
+    email_service.set_email_sender(fake)
+    yield fake
+    email_service.set_email_sender(None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_process_state():
+    """Rate-limit counters, email cooldowns and maps caches never leak between tests."""
+    rate_limit.reset_all()
+    map_service.clear_caches()
+    yield
+    rate_limit.reset_all()
+    map_service.clear_caches()
 
 
 # --------------------------------------------------------------------------
@@ -132,7 +172,7 @@ def college(test_session_factory):
     """A College row (name taken from the app's ALLOWED_COLLEGES list)."""
     db = test_session_factory()
     try:
-        row = user_model.College(name="DJSCE")
+        row = user_model.College(name="DJSCE", email_domains=[TEST_COLLEGE_DOMAIN])
         db.add(row)
         db.commit()
         db.refresh(row)
@@ -146,9 +186,10 @@ def make_user(test_session_factory):
     """Factory: make_user(email, full_name, college, phone=None) -> (user, auth_headers).
 
     Creates the User directly in the test DB with a bcrypt-hashed password (the
-    same algorithm as user_service.create_user; low cost factor for speed) and,
-    if a phone is given, a Profile row holding it (phone is not a User column).
-    auth_headers come from the app's own auth_service.create_access_token.
+    same algorithm as user_service.hash_password; low cost factor for speed), an
+    adult date of birth and a verified email, and, if a phone is given, a Profile
+    row holding it (phone is not a User column). auth_headers come from the
+    app's own auth_service.create_token_for_user.
     """
 
     def _make_user(email, full_name, college, phone=None):
@@ -162,6 +203,8 @@ def make_user(test_session_factory):
                 full_name=full_name,
                 hashed_password=hashed,
                 college_id=college.id,
+                date_of_birth=date(2000, 1, 1),
+                email_verified_at=datetime(2026, 1, 1),
             )
             db.add(user)
             db.commit()
@@ -169,7 +212,7 @@ def make_user(test_session_factory):
             if phone is not None:
                 db.add(profile_model.Profile(user_id=user.id, phone_number=phone))
                 db.commit()
-            token = auth_service.create_access_token(data={"sub": user.email})
+            token = auth_service.create_token_for_user(user)
             headers = {"Authorization": f"Bearer {token}"}
             return user, headers
         finally:

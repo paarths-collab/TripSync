@@ -44,7 +44,7 @@ jobs:
         run: >-
           python -m pytest -q tests/test_pooling_postgres.py
           tests/test_campus_request_postgres.py tests/test_campus_party_postgres.py
-          tests/test_repair_postgres.py
+          tests/test_repair_postgres.py tests/test_migrations.py
           tests/test_campus_acceptance.py::test_postgres_two_simultaneous_approvals_involving_one_student_yield_exactly_one_party
 
   frontend:

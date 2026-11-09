@@ -12,7 +12,9 @@ Run from backend/:
     DEMO_PASSWORD=... python -m scripts.seed_demo --reset   # delete demo data only
 
 The password is read only from the DEMO_PASSWORD environment variable and is
-never printed or logged. Nothing here drops tables.
+never printed or logged. Nothing here drops tables. The demo users are written
+directly as verified adults (fixed fictional date of birth), so they can sign
+in without registration; no college is opened to example.test addresses.
 
 Besides the two accounts, seeding also creates (idempotently) two campus
 landmarks with fictional coordinates ("Main Gate", a campus point, and "Airport
@@ -26,15 +28,15 @@ their events/outbox rows) and leaves every other user's data alone.
 import argparse
 import os
 import sys
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
-import bcrypt
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core import campus_time
+from app.core.config import settings
 from app.db import database as app_database
-from app.db.database import Base
+from app.db.schema import auto_create_schema
 from app.models import (
     campus_model,
     conversation_model,
@@ -43,7 +45,7 @@ from app.models import (
     profile_model,
     user_model,
 )
-from app.services.user_service import ALLOWED_COLLEGES, get_or_create_college, verify_password
+from app.services.user_service import ALLOWED_COLLEGES, get_or_create_college, hash_password, verify_password
 
 DEMO_COLLEGE_NAME = "DJSCE"
 assert DEMO_COLLEGE_NAME in ALLOWED_COLLEGES
@@ -63,6 +65,9 @@ DEMO_USERS = (
     },
 )
 DEMO_EMAILS = tuple(spec["email"] for spec in DEMO_USERS)
+# Fictional adult birth date. The seed writes demo users directly (already
+# verified), so the demo college never has to accept example.test addresses.
+DEMO_DATE_OF_BIRTH = date(2000, 1, 1)
 
 DEMO_TIMEZONE = "Asia/Kolkata"
 # Fictional coordinates (deliberately not a real campus or airport).
@@ -85,8 +90,7 @@ DEMO_WINDOWS = ((time(18, 0), time(19, 0)), (time(18, 30), time(19, 30)))
 
 
 def _hash_password(password: str) -> str:
-    # Same call as user_service.create_user.
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return hash_password(password)
 
 
 def _demo_user_ids(db: Session) -> list[int]:
@@ -110,8 +114,13 @@ def seed_demo(db: Session, password: str) -> list[user_model.User]:
             db.flush()  # assigns user.id for the profile row
         elif not verify_password(password, user.hashed_password):
             user.hashed_password = _hash_password(password)
+            user.token_version = (user.token_version or 0) + 1  # new password: old tokens end
         user.full_name = spec["full_name"]
         user.college_id = college.id
+        user.date_of_birth = DEMO_DATE_OF_BIRTH
+        user.is_active = True
+        if user.email_verified_at is None:
+            user.email_verified_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
         profile = db.query(profile_model.Profile).filter(profile_model.Profile.user_id == user.id).first()
         if profile is None:
@@ -485,7 +494,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         sys.exit(1)
 
-    Base.metadata.create_all(bind=app_database.engine)
+    if settings.db_auto_create:
+        auto_create_schema(app_database.engine)
     db = app_database.SessionLocal()
     try:
         if args.reset:

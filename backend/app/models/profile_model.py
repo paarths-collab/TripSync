@@ -1,10 +1,14 @@
 # backend/app/models/profile_model.py
 
-from sqlalchemy import Column, LargeBinary, String, ForeignKey, Integer, Text
+from sqlalchemy import JSON, Column, LargeBinary, String, ForeignKey, Integer, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import JSONB # Use JSONB for flexible data like reviews/preferences
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db.database import Base
+
+# JSONB on PostgreSQL (as before), plain JSON elsewhere so SQLite can create and
+# migrate the table without a custom compiler.
+PortableJSONB = JSON().with_variant(JSONB(), "postgresql")
 
 class Profile(Base):
     __tablename__ = "profiles"
@@ -26,18 +30,18 @@ class Profile(Base):
     # Using JSONB is perfect for storing lists of reviews or key-value preferences.
     # It's flexible and you don't need to define the exact structure in advance.
     # For example: {"communication": 5, "punctuality": 4}
-    reviews = Column(JSONB, nullable=True)
+    reviews = Column(PortableJSONB, nullable=True)
     
     # For example: {"allow_smoking": false, "preferred_music": "pop"}
-    preferences = Column(JSONB, nullable=True)
+    preferences = Column(PortableJSONB, nullable=True)
 
 
     # You also mentioned Social Media and Emergency Contact. Let's add those too.
     # For example: {"linkedin": "url", "twitter": "url"}
-    social_media_links = Column(JSONB, nullable=True)
+    social_media_links = Column(PortableJSONB, nullable=True)
     
     # For example: {"name": "Jane Doe", "phone": "1234567890"}
-    emergency_contact = Column(JSONB, nullable=True)
+    emergency_contact = Column(PortableJSONB, nullable=True)
     # ------------------------------------
     
     user = relationship("User", back_populates="profile")

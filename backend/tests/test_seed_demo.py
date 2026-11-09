@@ -588,3 +588,37 @@ def test_seed_uses_demo_names_when_an_existing_landmark_has_the_wrong_kind(clock
             (by_name["Demo Main Gate"].id, by_name["Demo Airport Terminal"].id)}
     finally:
         db.close()
+
+
+def test_seeded_demo_accounts_are_adult_verified_and_can_log_in(test_session_factory, client):
+    db = test_session_factory()
+    try:
+        demo.seed_demo(db, PASSWORD)
+        demo.seed_demo(db, PASSWORD)  # idempotent
+        users = db.query(user_model.User).all()
+        assert len(users) == 2
+        for user in users:
+            assert user.date_of_birth == demo.DEMO_DATE_OF_BIRTH
+            assert user.email_verified_at is not None
+            assert user.is_active is True
+        # The demo college is not opened to example.test: the seed writes users directly.
+        college = db.query(user_model.College).one()
+        assert not any("example.test" in d for d in (college.email_domains or []))
+    finally:
+        db.close()
+    for email in demo.DEMO_EMAILS:
+        response = client.post("/api/auth/token", data={"username": email, "password": PASSWORD})
+        assert response.status_code == 200, response.text
+
+
+def test_reseeding_with_a_new_password_revokes_old_demo_tokens(test_session_factory):
+    db = test_session_factory()
+    try:
+        first = demo.seed_demo(db, PASSWORD)
+        versions = [u.token_version for u in first]
+        again = demo.seed_demo(db, PASSWORD)
+        assert [u.token_version for u in again] == versions
+        changed = demo.seed_demo(db, "another-demo-password")
+        assert [u.token_version for u in changed] == [v + 1 for v in versions]
+    finally:
+        db.close()

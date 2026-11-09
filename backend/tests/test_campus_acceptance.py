@@ -327,7 +327,7 @@ def _cast(sf, tag, names):
         uid = seed_user(sf, ids["college_id"], name, tag, phone=phone)
         email = f"{name}.{tag}@example.test"
         headers = {"Authorization": "Bearer " + auth_service.create_access_token(
-            data={"sub": email})}
+            data={"sub": str(uid), "tv": 0})}
         cast.uid[name], cast.email[name], cast.phone[name] = uid, email, phone
         cast.dev[name] = SimulatedDevice(name, TestClient(app), headers, uid)
     return cast

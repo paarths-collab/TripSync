@@ -5,10 +5,9 @@ Conventions
 - Every datetime column is a NAIVE UTC ``DateTime`` (see app.core.campus_time).
 - Enums are Python ``str, Enum`` classes stored as VARCHAR (no native PG enum
   type, no CHECK constraint) so SQLite and PostgreSQL share one schema.
-- No migration framework exists: these tables are created by
-  ``Base.metadata.create_all`` (run at startup by app.main's lifespan). Existing
-  tables are never altered, so a deployed database gets the new tables simply by
-  restarting the app.
+- Schema changes ship as Alembic revisions (backend/migrations); the baseline
+  revision creates these tables. Local SQLite databases may instead be created
+  by ``Base.metadata.create_all`` at startup (DB_AUTO_CREATE).
 - Several invariants are enforced by the database itself with portable partial
   unique indexes (``postgresql_where`` + ``sqlite_where``).
 """
