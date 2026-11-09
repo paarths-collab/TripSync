@@ -1,332 +1,317 @@
 // src/app/(auth)/register.tsx
-
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, TextInput, View } from 'react-native';
+import { Text } from 'react-native-paper';
+import { useRouter } from 'expo-router';
+import AuthFormLayout from '../../components/onboarding/AuthFormLayout';
+import CollegePicker from '../../components/onboarding/CollegePicker';
+import DateOfBirthField, { DateOfBirthHandle } from '../../components/onboarding/DateOfBirthField';
+import LinkButton from '../../components/onboarding/LinkButton';
+import PasswordField from '../../components/onboarding/PasswordField';
 import {
-  StyleSheet,
-  Alert,
-  Pressable,
-  View,
-  KeyboardAvoidingView,
-  ScrollView,
-  Platform,
-} from 'react-native';
-import { Text, TextInput, Button, Menu } from 'react-native-paper';
-import { Link, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import ScreenWrapper from '../../components/ScreenWrapper';
-import { IconButton } from '../../components/ui';
-import { register } from '../../services/authService';
-import { palette, space, radius, font, shadow } from '../../constants/theme';
+  DateParts,
+  GENERIC_ERROR_MESSAGE,
+  MIN_AGE,
+  NETWORK_ERROR_MESSAGE,
+  formatDomains,
+  messageForCode,
+  normaliseEmail,
+  validateCollegeEmail,
+  validateDateOfBirth,
+  validateFullName,
+  validatePassword,
+} from '../../components/onboarding/validation';
+import { Banner, Button, TextField } from '../../components/ui';
+import { APP_NAME } from '../../constants/brand';
+import { palette, space, type } from '../../constants/theme';
+import { AuthError, College, getColleges, register } from '../../services/authService';
 
-// List of allowed colleges (must match backend)
-const ALLOWED_COLLEGES = [
-  'DJSCE',
-  'SPIT',
-  'VJTI',
-  'KJ SOMAIYA COLLEGE OF ENGINEERING',
-  'THAKUR COLLEGE OF ENGINEERING',
-  'ST. FRANCIS COLLEGE OF ENGINEERING',
-];
+type Field = 'fullName' | 'college' | 'email' | 'dob' | 'password';
+type Errors = Partial<Record<Field, string | null>>;
 
 export default function RegisterScreen() {
   const router = useRouter();
 
-  // State for each input field
+  const [colleges, setColleges] = useState<College[]>([]);
+  const [collegesLoading, setCollegesLoading] = useState(true);
+  const [collegesError, setCollegesError] = useState<string | null>(null);
+
   const [fullName, setFullName] = useState('');
+  const [college, setCollege] = useState<College | null>(null);
   const [email, setEmail] = useState('');
+  const [dob, setDob] = useState<DateParts>({ day: '', month: '', year: '' });
   const [password, setPassword] = useState('');
-  const [collegeName, setCollegeName] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
 
-  // State for dropdown menu
-  const [menuVisible, setMenuVisible] = useState(false);
-
-  // State for loading indicator on the button
+  const [touched, setTouched] = useState<Partial<Record<Field, boolean>>>({});
+  const [submitted, setSubmitted] = useState(false);
+  const [serverErrors, setServerErrors] = useState<Errors>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [emailTaken, setEmailTaken] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const emailRef = useRef<TextInput>(null);
+  const dobRef = useRef<DateOfBirthHandle>(null);
+  const passwordRef = useRef<TextInput>(null);
+
+  const loadColleges = useCallback(async () => {
+    setCollegesLoading(true);
+    setCollegesError(null);
+    try {
+      setColleges(await getColleges());
+    } catch (error) {
+      setCollegesError(
+        error instanceof AuthError && error.isNetworkError ? NETWORK_ERROR_MESSAGE : 'Please try again in a moment.',
+      );
+    } finally {
+      setCollegesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadColleges();
+  }, [loadColleges]);
+
+  const clientErrors: Errors = useMemo(
+    () => ({
+      fullName: validateFullName(fullName),
+      college: college ? null : 'Choose your college.',
+      email: validateCollegeEmail(email, college),
+      dob: validateDateOfBirth(dob).error,
+      password: validatePassword(password),
+    }),
+    [fullName, college, email, dob, password],
+  );
+
+  const errorFor = (field: Field) => serverErrors[field] ?? (submitted || touched[field] ? clientErrors[field] : null);
+
+  const touch = (field: Field) => setTouched((t) => (t[field] ? t : { ...t, [field]: true }));
+
+  const clearServer = (field: Field) => {
+    if (serverErrors[field]) setServerErrors((e) => ({ ...e, [field]: null }));
+    if (field === 'email') setEmailTaken(false);
+    if (formError) setFormError(null);
+  };
 
   const goBack = () => {
     if (router.canGoBack()) router.back();
-    else router.replace('/(auth)/landing');
+    else router.replace('/(auth)/welcome');
   };
 
-  const clearError = () => {
-    if (error) setError(null);
-  };
+  const submit = async () => {
+    if (loading) return;
+    setSubmitted(true);
+    const hasErrors = Object.values(clientErrors).some(Boolean);
+    const dobResult = validateDateOfBirth(dob);
+    if (hasErrors || !college || !dobResult.iso) return;
 
-  const handleRegister = async () => {
-    // Basic validation
-    if (!fullName || !email || !password || !collegeName) {
-      setError('Please fill in all fields.');
-      return;
-    }
-
-    setError(null);
-    setLoading(true); // Show loading spinner on the button
+    setLoading(true);
+    setFormError(null);
+    setServerErrors({});
+    setEmailTaken(false);
+    const address = normaliseEmail(email);
     try {
-      await register({
+      const res = await register({
         full_name: fullName,
-        email: email,
-        password: password,
-        college_name: collegeName,
+        email: address,
+        password,
+        college_id: college.id,
+        date_of_birth: dobResult.iso,
       });
-
-      Alert.alert(
-        'Success',
-        'Your account has been created successfully!',
-        [{ text: 'OK', onPress: () => router.push('./login') }] // Navigate on OK
-      );
-    } catch (error: any) {
-      setError(error?.message || 'Registration failed. Please try again.');
+      const sent = res.verification?.sent !== false;
+      router.push({
+        pathname: '/(auth)/verify-email',
+        params: {
+          email: res.email || address,
+          sent: sent ? '1' : '0',
+          resend: String(res.verification?.resend_after_seconds ?? 60),
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof AuthError)) {
+        setFormError(GENERIC_ERROR_MESSAGE);
+      } else if (error.isNetworkError) {
+        setFormError(NETWORK_ERROR_MESSAGE);
+      } else {
+        const message = messageForCode(error.code, {
+          retryAfterSeconds: error.retryAfterSeconds,
+          collegeName: college.name,
+          domains: college.email_domains,
+        });
+        switch (error.code) {
+          case 'email_taken':
+            setServerErrors({ email: 'An account with this email already exists.' });
+            setEmailTaken(true);
+            break;
+          case 'email_domain_mismatch':
+            setServerErrors({ email: message });
+            break;
+          case 'underage':
+          case 'invalid_date_of_birth':
+            setServerErrors({ dob: message });
+            break;
+          case 'weak_password':
+            setServerErrors({ password: message });
+            break;
+          case 'invalid_college':
+            setServerErrors({ college: message });
+            setCollege(null);
+            loadColleges();
+            break;
+          default:
+            setFormError(
+              error.status === 429
+                ? messageForCode('too_many_requests', { retryAfterSeconds: error.retryAfterSeconds })
+                : message || (error.status === 422 ? 'Check your details and try again.' : GENERIC_ERROR_MESSAGE),
+            );
+        }
+      }
     } finally {
-      setLoading(false); // Hide loading spinner
+      setLoading(false);
     }
   };
+
+  const domainHint = college?.email_domains.length
+    ? `Use your ${formatDomains(college.email_domains)} email`
+    : undefined;
 
   return (
-    <ScreenWrapper>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <IconButton icon="chevron-back" label="Go back" onPress={goBack} />
+    <AuthFormLayout
+      title="Create your account"
+      subtitle="Use your college email so you’re matched with students from your campus."
+      icon="person-add-outline"
+      onBack={goBack}
+    >
+      <TextField
+        label="Full name"
+        icon="person-outline"
+        value={fullName}
+        onChangeText={(v) => {
+          setFullName(v);
+          clearServer('fullName');
+        }}
+        onBlur={() => fullName && touch('fullName')}
+        error={errorFor('fullName')}
+        placeholder="As on your college ID"
+        autoCapitalize="words"
+        autoComplete="name"
+        textContentType="name"
+        returnKeyType="next"
+        editable={!loading}
+      />
 
-          <View style={styles.header}>
-            <Text style={styles.title} accessibilityRole="header">
-              Create your account
-            </Text>
-            <Text style={styles.subtitle}>
-              Join students from your college to plan shared rides.
-            </Text>
-          </View>
+      <CollegePicker
+        colleges={colleges}
+        loading={collegesLoading}
+        loadError={collegesError}
+        onRetry={loadColleges}
+        value={college}
+        onChange={(c) => {
+          setCollege(c);
+          clearServer('college');
+          touch('college');
+          if (!email) setTimeout(() => emailRef.current?.focus(), 350);
+        }}
+        error={errorFor('college')}
+      />
 
-          <View style={styles.form}>
-            <TextInput
-              label="Full name"
-              mode="outlined"
-              value={fullName}
-              onChangeText={(v) => {
-                setFullName(v);
-                clearError();
-              }}
-              autoCapitalize="words"
-              autoComplete="name"
-              textContentType="name"
-              left={<TextInput.Icon icon="account-outline" />}
-              outlineStyle={styles.outline}
-              style={styles.input}
-            />
-            <TextInput
-              label="Email"
-              mode="outlined"
-              value={email}
-              onChangeText={(v) => {
-                setEmail(v);
-                clearError();
-              }}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              textContentType="emailAddress"
-              left={<TextInput.Icon icon="email-outline" />}
-              outlineStyle={styles.outline}
-              style={styles.input}
-            />
-            <TextInput
-              label="Password"
-              mode="outlined"
-              value={password}
-              onChangeText={(v) => {
-                setPassword(v);
-                clearError();
-              }}
-              secureTextEntry={!showPassword}
-              autoCapitalize="none"
-              autoComplete="password-new"
-              textContentType="newPassword"
-              left={<TextInput.Icon icon="lock-outline" />}
-              right={
-                <TextInput.Icon
-                  icon={showPassword ? 'eye-off' : 'eye'}
-                  onPress={() => setShowPassword(!showPassword)}
-                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                />
-              }
-              outlineStyle={styles.outline}
-              style={styles.input}
-            />
+      <TextField
+        ref={emailRef}
+        label="College email"
+        icon="mail-outline"
+        value={email}
+        onChangeText={(v) => {
+          setEmail(v);
+          clearServer('email');
+        }}
+        onBlur={() => email && touch('email')}
+        error={errorFor('email')}
+        hint={domainHint}
+        placeholder={college?.email_domains[0] ? `you@${college.email_domains[0]}` : 'you@college.ac.in'}
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete="email"
+        textContentType="username"
+        returnKeyType="next"
+        onSubmitEditing={() => dobRef.current?.focus()}
+        editable={!loading}
+      />
+      {emailTaken ? (
+        <View style={styles.inlineAction}>
+          <LinkButton
+            label="Log in instead"
+            onPress={() => router.replace({ pathname: '/(auth)/login', params: { email: normaliseEmail(email) } })}
+          />
+        </View>
+      ) : null}
 
-            {/* College Dropdown */}
-            <Menu
-              visible={menuVisible}
-              onDismiss={() => setMenuVisible(false)}
-              anchorPosition="bottom"
-              anchor={
-                <Pressable
-                  onPress={() => setMenuVisible(true)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Select your college"
-                >
-                  <View pointerEvents="none">
-                    <TextInput
-                      label="College"
-                      mode="outlined"
-                      value={collegeName}
-                      editable={false}
-                      placeholder="Select your college"
-                      left={<TextInput.Icon icon="school-outline" />}
-                      right={<TextInput.Icon icon="chevron-down" />}
-                      outlineStyle={styles.outline}
-                      style={styles.input}
-                    />
-                  </View>
-                </Pressable>
-              }
-              contentStyle={styles.menuContent}
-            >
-              {ALLOWED_COLLEGES.map((college) => (
-                <Menu.Item
-                  key={college}
-                  onPress={() => {
-                    setCollegeName(college);
-                    setMenuVisible(false);
-                    clearError();
-                  }}
-                  title={college}
-                  titleStyle={[
-                    styles.menuItem,
-                    college === collegeName && styles.menuItemSelected,
-                  ]}
-                />
-              ))}
-            </Menu>
+      <DateOfBirthField
+        ref={dobRef}
+        value={dob}
+        onChange={(v) => {
+          setDob(v);
+          clearServer('dob');
+        }}
+        onBlur={() => dob.year.length === 4 && touch('dob')}
+        onSubmitEditing={() => passwordRef.current?.focus()}
+        error={errorFor('dob')}
+        hint={`You need to be ${MIN_AGE} or older.`}
+      />
 
-            {error ? (
-              <View style={styles.errorBox} accessibilityLiveRegion="polite">
-                <Ionicons name="alert-circle" size={18} color={palette.danger} />
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            ) : null}
+      <PasswordField
+        ref={passwordRef}
+        isNew
+        value={password}
+        onChangeText={(v) => {
+          setPassword(v);
+          clearServer('password');
+        }}
+        onBlur={() => password && touch('password')}
+        error={errorFor('password')}
+        returnKeyType="done"
+        onSubmitEditing={submit}
+        editable={!loading}
+      />
 
-            <Button
-              mode="contained"
-              onPress={handleRegister}
-              loading={loading}
-              disabled={loading}
-              style={styles.primaryButton}
-              contentStyle={styles.buttonContent}
-              labelStyle={styles.buttonLabel}
-            >
-              Create account
-            </Button>
-          </View>
+      {formError ? <Banner tone="danger" icon="alert-circle" text={formError} style={styles.banner} /> : null}
 
-          <View style={styles.switchRow}>
-            <Text style={styles.switchText}>Already have an account?</Text>
-            <Link href="./login" asChild>
-              <Button mode="text" compact disabled={loading} labelStyle={styles.switchLink}>
-                Log in
-              </Button>
-            </Link>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </ScreenWrapper>
+      <Button label="Create account" variant="dark" onPress={submit} loading={loading} style={styles.submit} />
+
+      <Text style={[type.caption, styles.footnote]}>
+        {APP_NAME} matches students for shared trips. You arrange and pay for travel yourselves.
+      </Text>
+
+      <View style={styles.switchRow}>
+        <Text style={[type.body, { color: palette.textMuted }]}>Already have an account?</Text>
+        <LinkButton label="Log in" onPress={() => router.replace('/(auth)/login')} disabled={loading} />
+      </View>
+    </AuthFormLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: space.xl,
-    paddingTop: space.md,
-    paddingBottom: space.xl,
-  },
-  header: {
-    marginTop: space.xl,
-    marginBottom: space.xl,
-  },
-  title: {
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: font.bold,
-    color: palette.text,
-    letterSpacing: -0.3,
-  },
-  subtitle: {
-    marginTop: space.xs,
-    fontSize: 15,
-    lineHeight: 21,
-    color: palette.textMuted,
-  },
-  form: {
-    gap: space.sm,
-  },
-  input: {
-    backgroundColor: palette.surface,
-  },
-  outline: {
-    borderRadius: radius.md,
-  },
-  menuContent: {
-    backgroundColor: palette.surface,
-    borderRadius: radius.md,
-    maxHeight: 300,
-    ...shadow.raised,
-  },
-  menuItem: {
-    fontSize: 14,
-    color: palette.text,
-  },
-  menuItemSelected: {
-    color: palette.primary,
-    fontWeight: font.semibold,
-  },
-  errorBox: {
-    flexDirection: 'row',
+  inlineAction: {
     alignItems: 'flex-start',
-    gap: space.xs,
-    padding: space.sm,
-    borderRadius: radius.md,
-    backgroundColor: palette.dangerSoft,
+    marginTop: -space.sm,
+    marginBottom: space.sm,
   },
-  errorText: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 19,
-    color: palette.danger,
+  banner: {
+    marginBottom: space.md,
   },
-  primaryButton: {
+  submit: {
     marginTop: space.xs,
-    borderRadius: radius.md,
   },
-  buttonContent: {
-    height: 52,
-  },
-  buttonLabel: {
-    fontSize: 16,
-    fontWeight: font.semibold,
+  footnote: {
+    color: palette.textMuted,
+    textAlign: 'center',
+    marginTop: space.md,
   },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: space.lg,
-  },
-  switchText: {
-    fontSize: 14,
-    color: palette.textMuted,
-  },
-  switchLink: {
-    fontSize: 14,
-    fontWeight: font.semibold,
+    flexWrap: 'wrap',
+    gap: space.xxs,
+    marginTop: space.sm,
   },
 });

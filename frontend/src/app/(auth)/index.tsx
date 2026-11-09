@@ -1,6 +1,6 @@
+// src/app/(auth)/index.tsx
 import { Redirect } from 'expo-router';
 
 export default function AuthIndex() {
-  // Redirect from /auth to /auth/login
-  return <Redirect href="./login" />;
+  return <Redirect href="/(auth)/welcome" />;
 }

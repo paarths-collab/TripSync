@@ -1,245 +1,186 @@
 // src/app/(auth)/login.tsx
-
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { StyleSheet, TextInput, View } from 'react-native';
+import { Text } from 'react-native-paper';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import AuthFormLayout from '../../components/onboarding/AuthFormLayout';
+import LinkButton from '../../components/onboarding/LinkButton';
+import PasswordField from '../../components/onboarding/PasswordField';
 import {
-  View,
-  StyleSheet,
-  KeyboardAvoidingView,
-  ScrollView,
-  Platform,
-} from 'react-native';
-import { Text, TextInput, Button } from 'react-native-paper';
-import { Link, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import ScreenWrapper from '../../components/ScreenWrapper';
-import { IconButton } from '../../components/ui';
-import apiClient from '../../services/api'; // We'll use the base client
+  GENERIC_ERROR_MESSAGE,
+  NETWORK_ERROR_MESSAGE,
+  messageForCode,
+  normaliseEmail,
+  validateLoginEmail,
+} from '../../components/onboarding/validation';
+import { Banner, Button, TextField } from '../../components/ui';
+import { APP_NAME } from '../../constants/brand';
+import { palette, space, type } from '../../constants/theme';
 import { useAuth } from '../../context/AuthContext';
-import { palette, space, radius, font } from '../../constants/theme';
+import { AuthError, logIn, requestEmailVerification } from '../../services/authService';
+
+function loginErrorMessage(error: unknown): string {
+  if (error instanceof AuthError) {
+    if (error.isNetworkError) return NETWORK_ERROR_MESSAGE;
+    if (error.status === 401) return 'That email and password don’t match. Try again or reset your password.';
+    const code = error.status === 429 ? 'too_many_requests' : error.code;
+    return messageForCode(code, { retryAfterSeconds: error.retryAfterSeconds }) ?? GENERIC_ERROR_MESSAGE;
+  }
+  // signIn() throws a plain Error with readable text if the new session is rejected.
+  return error instanceof Error && error.message ? error.message : GENERIC_ERROR_MESSAGE;
+}
 
 export default function LoginScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ email?: string; reset?: string }>();
   const { signIn } = useAuth();
 
-  // State for input fields
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(params.email ?? '');
   const [password, setPassword] = useState('');
+  const [errors, setErrors] = useState<{ email?: string | null; password?: string | null }>({});
+  const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const passwordRef = useRef<TextInput>(null);
+
+  // Coming back from a password reset pre-fills the email and clears the old password.
+  useEffect(() => {
+    if (params.email) setEmail(params.email);
+    if (params.reset === '1') {
+      setPassword('');
+      setErrors({});
+      setFormError(null);
+    }
+  }, [params.email, params.reset]);
 
   const goBack = () => {
     if (router.canGoBack()) router.back();
-    else router.replace('/(auth)/landing');
+    else router.replace('/(auth)/welcome');
   };
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      setError('Please enter both email and password.');
-      return;
-    }
-
-    setError(null);
-    setLoading(true);
-
-    // The backend's /token endpoint expects 'x-www-form-urlencoded' data.
-    // We create a URLSearchParams object to format the data correctly.
-    const formData = new URLSearchParams();
-    formData.append('username', email); // The API expects the email in the 'username' field
-    formData.append('password', password);
-
+  const goVerify = async (address: string) => {
+    let sent = '1';
+    let resend = 60;
     try {
-      const response = await apiClient.post('/auth/token', formData, {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      });
+      const res = await requestEmailVerification(address);
+      resend = res.resend_after_seconds ?? 60;
+    } catch (error) {
+      if (error instanceof AuthError && error.status === 429) resend = error.retryAfterSeconds ?? 60;
+      else sent = '0'; // the verify screen will try again
+    }
+    router.push({ pathname: '/(auth)/verify-email', params: { email: address, sent, resend: String(resend) } });
+  };
 
-      const accessToken = response.data.access_token;
-      await signIn(accessToken);
-    } catch (error: any) {
-      const detail = error.response?.data?.detail;
-      const errorMessage =
-        typeof detail === 'string' && detail
-          ? detail
-          : 'Login failed. Please check your credentials.';
-      setError(errorMessage);
+  const submit = async () => {
+    if (loading) return;
+    const emailError = validateLoginEmail(email);
+    const passwordError = password ? null : 'Enter your password.';
+    setErrors({ email: emailError, password: passwordError });
+    if (emailError || passwordError) return;
+
+    setFormError(null);
+    setLoading(true);
+    const address = normaliseEmail(email);
+    try {
+      const { access_token } = await logIn(address, password);
+      await signIn(access_token);
+      // AuthContext moves on to the location primer or the app.
+    } catch (error) {
+      if (error instanceof AuthError && error.status === 403 && error.code === 'email_not_verified') {
+        await goVerify(address);
+      } else {
+        setFormError(loginErrorMessage(error));
+      }
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <ScreenWrapper>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <IconButton icon="chevron-back" label="Go back" onPress={goBack} />
+    <AuthFormLayout
+      title="Welcome back"
+      subtitle="Log in with your college email to find students heading your way."
+      icon="log-in-outline"
+      onBack={goBack}
+    >
+      {params.reset === '1' ? (
+        <Banner
+          tone="success"
+          icon="checkmark-circle"
+          text="Password updated. Log in with your new password."
+          style={styles.banner}
+        />
+      ) : null}
 
-          <View style={styles.header}>
-            <Text style={styles.title} accessibilityRole="header">
-              Welcome back
-            </Text>
-            <Text style={styles.subtitle}>Log in to see your ride plans and chats.</Text>
-          </View>
+      <TextField
+        label="College email"
+        icon="mail-outline"
+        value={email}
+        onChangeText={(v) => {
+          setEmail(v);
+          if (errors.email) setErrors((e) => ({ ...e, email: null }));
+          if (formError) setFormError(null);
+        }}
+        error={errors.email}
+        placeholder="you@college.ac.in"
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete="email"
+        textContentType="username"
+        returnKeyType="next"
+        onSubmitEditing={() => passwordRef.current?.focus()}
+        editable={!loading}
+      />
 
-          <View style={styles.form}>
-            <TextInput
-              label="Email"
-              mode="outlined"
-              value={email}
-              onChangeText={(v) => {
-                setEmail(v);
-                if (error) setError(null);
-              }}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              textContentType="emailAddress"
-              returnKeyType="next"
-              left={<TextInput.Icon icon="email-outline" />}
-              outlineStyle={styles.outline}
-              style={styles.input}
-            />
-            <TextInput
-              label="Password"
-              mode="outlined"
-              value={password}
-              onChangeText={(v) => {
-                setPassword(v);
-                if (error) setError(null);
-              }}
-              secureTextEntry={!showPassword}
-              autoCapitalize="none"
-              autoComplete="password"
-              textContentType="password"
-              returnKeyType="go"
-              onSubmitEditing={handleLogin}
-              left={<TextInput.Icon icon="lock-outline" />}
-              right={
-                <TextInput.Icon
-                  icon={showPassword ? 'eye-off' : 'eye'}
-                  onPress={() => setShowPassword(!showPassword)}
-                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                />
-              }
-              outlineStyle={styles.outline}
-              style={styles.input}
-            />
+      <PasswordField
+        ref={passwordRef}
+        value={password}
+        onChangeText={(v) => {
+          setPassword(v);
+          if (errors.password) setErrors((e) => ({ ...e, password: null }));
+          if (formError) setFormError(null);
+        }}
+        error={errors.password}
+        returnKeyType="go"
+        onSubmitEditing={submit}
+        editable={!loading}
+      />
 
-            {error ? (
-              <View style={styles.errorBox} accessibilityLiveRegion="polite">
-                <Ionicons name="alert-circle" size={18} color={palette.danger} />
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            ) : null}
+      <View style={styles.forgotRow}>
+        <LinkButton
+          label="Forgot password?"
+          onPress={() => router.push({ pathname: '/(auth)/forgot-password', params: email ? { email } : {} })}
+          disabled={loading}
+        />
+      </View>
 
-            <Button
-              mode="contained"
-              onPress={handleLogin}
-              loading={loading}
-              disabled={loading}
-              style={styles.primaryButton}
-              contentStyle={styles.buttonContent}
-              labelStyle={styles.buttonLabel}
-            >
-              Log in
-            </Button>
-          </View>
+      {formError ? <Banner tone="danger" icon="alert-circle" text={formError} style={styles.banner} /> : null}
 
-          <View style={styles.switchRow}>
-            <Text style={styles.switchText}>Don&apos;t have an account?</Text>
-            <Link href="./register" asChild>
-              <Button mode="text" compact disabled={loading} labelStyle={styles.switchLink}>
-                Create one
-              </Button>
-            </Link>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </ScreenWrapper>
+      <Button label="Log in" variant="dark" onPress={submit} loading={loading} />
+
+      <View style={styles.switchRow}>
+        <Text style={[type.body, { color: palette.textMuted }]}>New to {APP_NAME}?</Text>
+        <LinkButton label="Create account" onPress={() => router.replace('/(auth)/register')} disabled={loading} />
+      </View>
+    </AuthFormLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
+  banner: {
+    marginBottom: space.md,
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: space.xl,
-    paddingTop: space.md,
-    paddingBottom: space.xl,
-  },
-  header: {
-    marginTop: space.xl,
-    marginBottom: space.xl,
-  },
-  title: {
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: font.bold,
-    color: palette.text,
-    letterSpacing: -0.3,
-  },
-  subtitle: {
-    marginTop: space.xs,
-    fontSize: 15,
-    lineHeight: 21,
-    color: palette.textMuted,
-  },
-  form: {
-    gap: space.sm,
-  },
-  input: {
-    backgroundColor: palette.surface,
-  },
-  outline: {
-    borderRadius: radius.md,
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: space.xs,
-    padding: space.sm,
-    borderRadius: radius.md,
-    backgroundColor: palette.dangerSoft,
-  },
-  errorText: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 19,
-    color: palette.danger,
-  },
-  primaryButton: {
-    marginTop: space.xs,
-    borderRadius: radius.md,
-  },
-  buttonContent: {
-    height: 52,
-  },
-  buttonLabel: {
-    fontSize: 16,
-    fontWeight: font.semibold,
+  forgotRow: {
+    alignItems: 'flex-end',
+    marginTop: -space.xs,
+    marginBottom: space.sm,
   },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: space.xxs,
     marginTop: space.lg,
-  },
-  switchText: {
-    fontSize: 14,
-    color: palette.textMuted,
-  },
-  switchLink: {
-    fontSize: 14,
-    fontWeight: font.semibold,
   },
 });
