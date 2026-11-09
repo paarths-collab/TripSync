@@ -10,6 +10,8 @@ import { Keyboard, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palette, radius, shadow, space, type, fonts } from '../../constants/theme';
+import { useAuth } from '../../context/AuthContext';
+import { LoadingState } from '../../components/ui';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -86,6 +88,12 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 }
 
 export default function MainLayout() {
+  const { token, isLoading } = useAuth();
+  // Tab screens fetch on mount; wait until the saved session is restored so their
+  // first request carries the token. AuthContext redirects signed-out users.
+  if (isLoading || !token) {
+    return <LoadingState style={{ flex: 1, backgroundColor: palette.background }} />;
+  }
   return (
     <Tabs
       tabBar={(props) => <FloatingTabBar {...props} />}
