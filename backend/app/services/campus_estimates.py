@@ -75,12 +75,10 @@ async def _fetch(start, end) -> tuple:
     if route is None:
         return EstimateStatus.UNVERIFIED, None, None, FAILURE_NO_ROUTE
     try:
-        distance = int(route["distance_meters"])
-        duration = int(route["duration_seconds"])
-    except (KeyError, TypeError, ValueError):
+        distance = map_service.parse_route_metric(route["distance_meters"])
+        duration = map_service.parse_route_metric(route["duration_seconds"])
+    except (KeyError, TypeError, ValueError, map_service.RoutingProviderError):
         logger.warning("corridor estimate: malformed provider result")
-        return EstimateStatus.UNVERIFIED, None, None, FAILURE_UNAVAILABLE
-    if distance < 0 or duration < 0:
         return EstimateStatus.UNVERIFIED, None, None, FAILURE_UNAVAILABLE
     return EstimateStatus.VERIFIED, distance, duration, None
 
@@ -110,6 +108,16 @@ def cached_status(db: Session, origin_landmark_id: int, hub_id: int, direction) 
         return _val(row.status) if row is not None else EstimateStatus.UNVERIFIED.value
     except Exception:  # noqa: BLE001
         return EstimateStatus.UNVERIFIED.value
+
+
+def cached_for_warnings(db: Session, request, now: datetime):
+    """Use only a fresh persisted estimate; never call a provider under row locks."""
+    row = db.query(CorridorEstimate).filter(
+        CorridorEstimate.origin_landmark_id == request.origin_landmark_id,
+        CorridorEstimate.hub_id == request.hub_id,
+        CorridorEstimate.direction == request.direction,
+    ).populate_existing().first()
+    return row if row is not None and _is_fresh(row, now) else None
 
 
 async def corridor_estimate(

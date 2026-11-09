@@ -30,25 +30,32 @@ def create_new_service_post(
 @router.get("", response_model=List[service_schema.ServicePostList])
 def get_all_open_service_posts(
     db: Session = Depends(get_db),
+    current_user=Depends(auth_service.get_optional_user),
     skip: int = 0,
     limit: int = 20,
     search: Optional[str] = None,
     tags: Optional[List[str]] = Query(None)
 ):
-    posts = service_service.get_all_service_posts(db=db, skip=skip, limit=limit, search=search, tags=tags)
+    posts = service_service.get_all_service_posts(
+        db=db, skip=skip, limit=limit, search=search, tags=tags,
+        viewer_id=current_user.id if current_user else None,
+    )
     return posts
 
 @router.get("/{post_id}", response_model=service_schema.ServicePostDetail)
 def get_single_service_post(
     post_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user=Depends(auth_service.get_optional_user),
 ):
     """
     Fetches a single service post. The response model handles serialization.
     """
-    post = service_service.get_service_post_by_id(db=db, post_id=post_id)
+    post = service_service.get_service_post_by_id(
+        db=db, post_id=post_id, viewer_id=current_user.id if current_user else None,
+    )
     if not post:
-        raise HTTPException(status_code=status.HTTP_401_NOT_FOUND, detail="Service post not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service post not found")
     # --- THIS IS THE FIX ---
     # The old code that processed requirements/filters has been removed.
     return post

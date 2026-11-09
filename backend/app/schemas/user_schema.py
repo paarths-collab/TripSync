@@ -2,7 +2,7 @@
 
 # --- REMOVE THIS IMPORT ---
 # import uuid
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 
 # --- College Schemas ---
 class CollegeBase(BaseModel):
@@ -27,6 +27,13 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
     college_name: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_bytes(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must be at most 72 UTF-8 bytes")
+        return value
 
 class User(UserBase):
     # --- CHANGE THESE TWO LINES ---

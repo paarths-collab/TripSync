@@ -1,6 +1,7 @@
 # backend/app/services/map_service.py
 
 import httpx
+import math
 from typing import Dict, Any
 from app.core.config import settings
 import logging
@@ -17,6 +18,16 @@ class RoutingProviderError(Exception):
 
 class RoutingProviderTimeout(RoutingProviderError):
     """The routing provider did not answer in time."""
+
+
+def parse_route_metric(value: Any) -> int:
+    """Require an explicit finite, non-negative numeric provider metric."""
+    if (
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        or not 0 <= value <= 2_147_483_647 or not math.isfinite(value)
+    ):
+        raise RoutingProviderError("Routing provider returned an invalid metric")
+    return int(value)
 
 
 def decode_polyline(encoded_polyline: str) -> list[tuple[float, float]]:
@@ -146,8 +157,8 @@ async def get_route_from_ola(
         leg = legs[0]  # Take the first leg
 
         # Extract distance and duration - they are direct values in the /basic endpoint
-        distance_meters = leg.get("distance", 0)
-        duration_seconds = leg.get("duration", 0)
+        distance_meters = parse_route_metric(leg.get("distance"))
+        duration_seconds = parse_route_metric(leg.get("duration"))
 
         logger.info(f"Route found - Distance: {distance_meters}m, Duration: {duration_seconds}s")
 

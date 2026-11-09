@@ -94,7 +94,9 @@ DEMO_PASSWORD=... python -m scripts.seed_demo           # create or update the d
 DEMO_PASSWORD=... python -m scripts.seed_demo --reset   # delete only the demo users' chat and pooling data
 ```
 
-`--reset` never drops tables and leaves other users' data alone.
+`--reset` never drops tables. It ends a non-demo partner's legacy pooling request
+when removing their shared demo ride, and releases a non-demo campus party
+partner's request. Unrelated users' data stays unchanged.
 
 ---
 
@@ -131,6 +133,23 @@ python -m pytest -q
 ```
 
 The tests run offline on an in-memory SQLite database. They need no running Postgres and no Ola Maps key.
+
+CI also starts a disposable PostgreSQL 15 service and runs the opt-in concurrency
+tests, including `tests/test_repair_postgres.py`. Locally, point
+`TRIPSYNC_TEST_PG_URL` at a disposable database to enable these cases. Each test
+creates and drops only its own temporary schema.
+
+Registration accepts passwords up to 72 UTF-8 bytes (the bcrypt limit). Longer
+passwords return 422 on registration and fail login with 401.
+
+Anonymous service posts return `poster: null`; their `poster_user_id` is also
+null for public reads and other users. An authenticated owner retains their own
+ID for management controls. Public named posts retain their poster information.
+
+The frontend keeps the pooling socket open after approval and reconciles via
+`GET /api/pool/requests/current` on screen focus, app resume and every five seconds
+while foregrounded. Run its offline regression tests from `frontend/` with
+`npm ci --ignore-scripts` followed by `npm test`.
 
 ---
 

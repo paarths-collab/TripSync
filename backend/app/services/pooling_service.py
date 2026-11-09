@@ -150,8 +150,16 @@ async def _get_distances_from_ola(origin: tuple, destinations: List[tuple]) -> L
 # ==================== LOCKING ====================
 # Lock-ordering rule used everywhere (prevents Postgres deadlocks; harmless on
 # SQLite): lock every involved PoolingRequest row with SELECT ... FOR UPDATE in
-# ASCENDING id order FIRST, and only then touch PoolingConnection rows. Rows are
+# ASCENDING id order before touching PoolingConnection rows. Rows are
 # re-read (populate_existing) so statuses are the latest committed ones.
+# Creation and approval also lock users first: an empty set of request rows
+# cannot serialize two initial searches or approvals involving distinct requests.
+
+def _lock_users(db: Session, user_ids) -> None:
+    db.query(user_model.User.id).filter(
+        user_model.User.id.in_(sorted(set(user_ids)))
+    ).order_by(user_model.User.id).with_for_update(key_share=True).all()
+
 
 def _lock_requests(db: Session, request_ids) -> dict:
     ids = sorted({i for i in request_ids if i is not None})
@@ -212,6 +220,7 @@ async def create_or_update_pooling_request(
     """
     user_id = user.id
     try:
+        _lock_users(db, [user_id])
         # Lock ALL of this user's live requests first, then decide: a concurrent
         # approval cannot leave the user CONNECTED plus a fresh ACTIVE request.
         live = db.query(pooling_model.PoolingRequest).filter(
@@ -552,6 +561,8 @@ async def respond_to_connection(
     notifications: List[Notification] = []
 
     try:
+        if action == "approve":
+            _lock_users(db, [sender_user.id, responder_user.id])
         # Lock-ordering rule: requests (ascending id) first, then the connection rows.
         # With READ COMMITTED a losing concurrent approver then sees the connection
         # already REJECTED/APPROVED and gets a clean 409 instead of a deadlock.
@@ -568,6 +579,12 @@ async def respond_to_connection(
             raise HTTPException(status_code=409, detail="Connection already responded to")
 
         if action == "approve":
+            busy = db.query(pooling_model.PoolingRequest.id).filter(
+                pooling_model.PoolingRequest.user_id.in_([sender_user.id, responder_user.id]),
+                pooling_model.PoolingRequest.status == _RequestStatus.CONNECTED,
+            ).first()
+            if busy:
+                raise HTTPException(status_code=409, detail="A participant already has an active ride")
             requests = list(locked_requests.values())
             if len(requests) != 2 or any(r.status not in _OPEN_STATUSES for r in requests):
                 raise HTTPException(

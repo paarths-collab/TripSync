@@ -196,6 +196,11 @@ When a request has `arrive_by`, the suggestion carries a warning:
 
 Proposing a connection on a suggestion with warnings requires `acknowledge_warnings: true`. Otherwise the response is 409 `warnings_unacknowledged`.
 
+Proposal creation also recomputes deadline warnings using the current locked
+requests, the current time rounded up to the minute, and a fresh cached corridor
+estimate. Without a fresh estimate the deadline is unverified. An older
+suggestion therefore cannot bypass a warning that appeared as time passed.
+
 ### 3.3 Constants
 
 From `backend/app/core/campus_rules.py`:
@@ -280,7 +285,7 @@ The caller's own AGREED party is the only party that can appear. Another user's 
 | GET | `/requests/{id}` | none | 200 `TravelRequest` | 404 `"Request not found"` (also for another user's request) |
 | PATCH | `/requests/{id}` | `expected_version` (required), `earliest_departure`, `latest_departure`, `arrive_by`, `flexibility_consent` (all optional) | 200 `TravelRequest` | 404; 409 `request_not_open` (not OPEN), `stale_version`, `overlapping_request`; 422 window codes as above and `arrive_by_before_window`. |
 | DELETE | `/requests/{id}` | none | 200 `TravelRequest` | 404; 409 `use_party_cancel` (request is RESERVED). An already-terminal request returns 200 unchanged. |
-| GET | `/requests/{id}/suggestions` | none | 200 `{request_id, estimate_status, suggestions, truncated}` | 404 `"Request not found"` |
+| GET | `/requests/{id}/suggestions` | none | 200 `{request_id, estimate_status, suggestions, truncated}` | 404 `"Request not found"`; 409 `request_changed` if repeated concurrent invalidation exhausts the bounded retries |
 
 PATCH details:
 
@@ -398,6 +403,12 @@ The server is the source of truth. Sockets are an accelerator. A client that has
 3. Replace local state with the returned `party` view. Apply `events` in ascending `version`. `latest_version` is the version the client now matches.
 
 Within a party, `version` only increases. A client should not apply an event whose version is at or below the version it already holds.
+
+The event read holds a shared party-row lock through view construction and
+acknowledgment, so `party.version`, `latest_version` and the returned events
+describe the same committed state. Suggestion refreshes retry after a concurrent
+edit or cancellation deletes their stored suggestion; after three unsuccessful
+attempts they return 409 `request_changed` with the caller's current request.
 
 ### 5.3 Cancel retry
 
@@ -523,7 +534,12 @@ docker stop tripsync-campus-pg   # --rm removes the container
 
 `TRIPSYNC_TEST_PG_ITERATIONS` defaults to 5. A `sqlite:///` URL also works, for a dry run of the same assertions on a file-backed SQLite database.
 
-The CI workflow (`.github/workflows/backend-tests.yml`) runs `python -m pytest -q` without `TRIPSYNC_TEST_PG_URL`. The Postgres tests are skipped there.
+The CI workflow (`.github/workflows/backend-tests.yml`) first runs the SQLite
+suite, then starts the opt-in tests against its disposable PostgreSQL 15 service.
+It includes the PostgreSQL acceptance case and `tests/test_repair_postgres.py`.
+The latter covers concurrent first pooling searches, approval of legacy duplicate
+requests, suggestion refresh racing request invalidation, and consistent event
+snapshots during a concurrent party update.
 
 ### 6.5 What the SQLite suite cannot prove
 
@@ -581,7 +597,7 @@ DEMO_PASSWORD=... python -m scripts.seed_demo --reset   # delete demo data only
 
 - Seeding creates two demo riders with fictional data, two landmarks ("Main Gate", a campus point, and "Airport Terminal", a hub), and one OPEN request per rider. The requests cover 18:00 to 19:00 and 18:30 to 19:30 Asia/Kolkata on the next local day, on the same corridor. The two riders therefore see each other as a suggestion.
 - The script prints the demo account email addresses. It never prints the password.
-- `--reset` deletes the demo riders' chat, pooling and campus data, including their requests, suggestions, proposals, parties, events, outbox rows and idempotency records. It releases any other participant's RESERVED request the way a party cancel does. It does not drop tables and does not touch other users' data.
+- `--reset` deletes the demo riders' chat, pooling and campus data, including their requests, suggestions, proposals, parties, events, outbox rows and idempotency records. A surviving legacy ride partner's CONNECTED request becomes CANCELLED so they can search again. A surviving campus participant's RESERVED request is released the way a party cancel does. It does not drop tables or change unrelated users' data.
 
 ---
 

@@ -1,6 +1,7 @@
 # backend/app/services/user_service.py
 
 import bcrypt
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import user_model
@@ -20,7 +21,13 @@ ALLOWED_COLLEGES = [
 # --- ADD THIS NEW FUNCTION ---
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Checks if a plain text password matches a hashed password."""
-    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    encoded = plain_password.encode('utf-8')
+    if len(encoded) > 72:
+        return False
+    try:
+        return bcrypt.checkpw(encoded, hashed_password.encode('utf-8'))
+    except ValueError:
+        return False
 
 def get_user_by_email(db: Session, email: str):
     """Fetches a user from the database by their email address."""
@@ -45,7 +52,7 @@ def create_user(db: Session, user: user_schema.UserCreate):
     """Creates a new user in the database."""
     # Validate college name
     if user.college_name not in ALLOWED_COLLEGES:
-        raise ValueError(f"Invalid college name. Must be one of: {', '.join(ALLOWED_COLLEGES)}")
+        raise HTTPException(status_code=422, detail="Invalid college name")
     
     # Hash the password using bcrypt directly
     hashed_password = bcrypt.hashpw(user.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')

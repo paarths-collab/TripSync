@@ -19,6 +19,7 @@ from typing import Dict, List, Tuple
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import NoResultFound, StaleDataError
 
 from app.core import campus_rules, campus_time
 from app.models.campus_model import (
@@ -177,6 +178,23 @@ def _upsert_suggestion(
 
 
 async def suggestions_for_request(
+    db: Session, user: User, request_id: int, now: datetime
+) -> dict:
+    """Retry a refresh invalidated by a concurrent request edit or cancellation."""
+    for attempt in range(3):
+        try:
+            return await _suggestions_once(db, user, request_id, now)
+        except (StaleDataError, NoResultFound):
+            db.rollback()
+            if attempt == 2:
+                row = campus_request_service.get_own_request(db, user, request_id)
+                raise campus_request_service.conflict(
+                    "request_changed", "The request changed during search; please retry",
+                    {"request": campus_request_service.request_view(row)},
+                ) from None
+
+
+async def _suggestions_once(
     db: Session, user: User, request_id: int, now: datetime
 ) -> dict:
     """Compute, persist (idempotently) and return the suggestions for the caller's request."""

@@ -63,7 +63,7 @@ from app.models.campus_model import (
     TravelRequestStatus,
 )
 from app.schemas import campus_schema as schemas
-from app.services import campus_events, campus_idempotency, campus_outbox
+from app.services import campus_events, campus_idempotency, campus_outbox, campus_estimates
 
 logger = logging.getLogger(__name__)
 
@@ -408,6 +408,7 @@ async def create_proposal(
         mine = req_low if req_low.user_id == uid else req_high
         other = req_high if mine is req_low else req_low
 
+        now, now_db = _now()  # acquiring the request locks may have waited
         _expire_overdue_proposals(db, now, request_ids=[low_id, high_id])
 
         elig = campus_rules.eligible_pair(req_low, req_high, now)
@@ -430,6 +431,13 @@ async def create_proposal(
                        {"proposal": _proposal_dict(duplicate, uid)})
 
         warnings = list(suggestion.warnings or [])
+        # Time and cached estimates may have changed since the suggestion was
+        # displayed. Re-evaluate deadlines against current locked requests.
+        estimate = campus_estimates.cached_for_warnings(db, req_low, now)
+        departure = max(elig.feasible_start, campus_time.ceil_minute(now))
+        warnings = list(dict.fromkeys(warnings + campus_rules.deadline_warnings(
+            req_low, req_high, departure, estimate,
+        )))
         if warnings and not body.acknowledge_warnings:
             raise _err(409, "warnings_unacknowledged",
                        "This match has warnings that must be acknowledged.",

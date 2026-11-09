@@ -13,6 +13,13 @@ from app.schemas import token_schema
 from app.models import user_model
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token", auto_error=False)
+
+
+def get_optional_user(
+    token: str | None = Depends(optional_oauth2_scheme), db: Session = Depends(get_db)
+):
+    return get_current_user(token, db) if token is not None else None
 
 def create_access_token(data: dict):
     to_encode = data.copy()

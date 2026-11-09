@@ -135,6 +135,14 @@ async def get_events(
                 server_time=_server_time(),
             )
 
+    # Every party mutation locks this row before changing state or adding events.
+    # Hold a shared lock through snapshot construction and acknowledgment so the
+    # returned cursor cannot advance beyond the party view. Refresh the ORM row
+    # in case it changed after the membership/default-party lookup above.
+    party = (
+        db.query(TravelParty).filter(TravelParty.id == party.id)
+        .populate_existing().with_for_update(read=True).one()
+    )
     events = (
         db.query(PartyEvent)
         .filter(PartyEvent.party_id == party.id, PartyEvent.version > after_version)
@@ -142,8 +150,6 @@ async def get_events(
         .all()
     )
     latest_version = party.version
-    if events:
-        latest_version = max(latest_version, events[-1].version)
 
     response = EventsResponse(
         party_id=party.id,

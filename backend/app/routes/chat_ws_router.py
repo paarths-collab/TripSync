@@ -47,6 +47,7 @@ async def chat_websocket(
         return
 
     user_id = current_user.id
+    db.rollback()  # release the authentication query before waiting on a socket
 
     # Echo only the protocol name 'token' (never the JWT) when the client offered it.
     offered = websocket.scope.get("subprotocols", [])
@@ -55,7 +56,10 @@ async def chat_websocket(
     )
 
     try:
-        await campus_outbox.flush_on_connect(db, user_id)
+        try:
+            await campus_outbox.flush_on_connect(db, user_id)
+        finally:
+            db.rollback()
         while True:
             data = await websocket.receive_text()
 
@@ -97,11 +101,15 @@ async def chat_websocket(
             # session so a ride cancelled mid-socket is honoured.
             db.rollback()
             db.expire_all()
-            grant = connection_access.authorize_relay(
-                db, user_id, receiver_id,
-                message_data.get("connection_id"), message_data.get("party_id"),
-            )
-            if grant is None:
+            try:
+                grant = connection_access.authorize_relay(
+                    db, user_id, receiver_id,
+                    message_data.get("connection_id"), message_data.get("party_id"),
+                )
+                reference = connection_access.grant_ref(grant) if grant is not None else None
+            finally:
+                db.rollback()
+            if reference is None:
                 if not await _send_error(websocket, "not_authorized", NOT_AUTHORIZED_DETAIL):
                     break
                 continue
@@ -110,7 +118,7 @@ async def chat_websocket(
                 {
                     "type": "chat_message",
                     "message_id": message_data.get("message_id"),
-                    **connection_access.grant_ref(grant),
+                    **reference,
                     "sender_id": user_id,
                     "content": content,
                     "created_at": message_data.get("created_at"),
@@ -127,4 +135,5 @@ async def chat_websocket(
         except Exception:
             pass
     finally:
+        db.rollback()
         manager.disconnect(user_id, websocket)

@@ -54,7 +54,8 @@ class ServiceApplicationStatusUpdate(BaseModel):
 class ServicePostBase(BaseModel):
     id: int
     title: str
-    poster_user_id: int
+    poster_user_id: Optional[int]
+    is_anonymous: bool = False
     status: ServiceStatus
     team_size: int
     deadline: Optional[datetime] = None
@@ -73,7 +74,6 @@ class ServicePostDetail(ServicePostBase):
     description: str
     requires_resume: bool
     requires_cover_letter: bool
-    is_anonymous: bool
 
 # --- MODIFIED: The ServiceApplication schema now correctly includes the nested post ---
 class ServiceApplication(BaseModel):

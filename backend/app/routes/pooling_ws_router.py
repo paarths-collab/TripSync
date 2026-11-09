@@ -53,6 +53,7 @@ async def websocket_endpoint(
     # Capture plain values: the ORM object can be expired by later DB refreshes.
     user_id = current_user.id
     user_name = current_user.full_name
+    db.rollback()  # release the authentication query before waiting on a socket
 
     # Echo only the protocol name 'token' (never the JWT) when the client offered it.
     offered = websocket.scope.get("subprotocols", [])
@@ -61,7 +62,10 @@ async def websocket_endpoint(
     )
 
     try:
-        await campus_outbox.flush_on_connect(db, user_id)
+        try:
+            await campus_outbox.flush_on_connect(db, user_id)
+        finally:
+            db.rollback()
         while True:
             data = await websocket.receive_text()
 
@@ -93,11 +97,15 @@ async def websocket_endpoint(
             # session so a ride cancelled mid-socket is honoured.
             db.rollback()
             db.expire_all()
-            grant = connection_access.authorize_relay(
-                db, user_id, receiver_id,
-                message_data.get("connection_id"), message_data.get("party_id"),
-            )
-            if grant is None:
+            try:
+                grant = connection_access.authorize_relay(
+                    db, user_id, receiver_id,
+                    message_data.get("connection_id"), message_data.get("party_id"),
+                )
+                reference = connection_access.grant_ref(grant) if grant is not None else None
+            finally:
+                db.rollback()
+            if reference is None:
                 if not await _send_error(websocket, "not_authorized", NOT_AUTHORIZED_DETAIL):
                     break
                 continue
@@ -108,7 +116,7 @@ async def websocket_endpoint(
                     "sender_id": user_id,
                     "sender_name": user_name,
                     "content": content,
-                    **connection_access.grant_ref(grant),
+                    **reference,
                     "created_at": message_data.get("created_at"),
                 },
                 receiver_id if isinstance(receiver_id, int) else int(receiver_id),
@@ -123,4 +131,5 @@ async def websocket_endpoint(
         except Exception:
             pass
     finally:
+        db.rollback()
         manager.disconnect(user_id, websocket)

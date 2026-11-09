@@ -59,8 +59,9 @@ def get_all_service_posts(
     skip: int = 0, 
     limit: int = 100,
     search: Optional[str] = None,
-    tags: Optional[List[str]] = None
-) -> List[service_model.ServicePost]:
+    tags: Optional[List[str]] = None,
+    viewer_id: Optional[int] = None,
+) -> List[service_schema.ServicePostList]:
     """
     Fetches a list of open service posts with optional search and tag filtering.
     """
@@ -86,23 +87,27 @@ def get_all_service_posts(
         service_model.ServicePost.created_at.desc()
     ).offset(skip).limit(limit).all()
     
-    for post in posts:
-        if post.is_anonymous:
-            post.poster = None
-            
-    return posts
+    return [_post_view(post, service_schema.ServicePostList, viewer_id) for post in posts]
 
-def get_service_post_by_id(db: Session, post_id: int) -> service_model.ServicePost | None:
+def _post_view(post, schema, viewer_id):
+    view = schema.model_validate(post)
+    if post.is_anonymous:
+        view.poster = None
+        if post.poster_user_id != viewer_id:
+            view.poster_user_id = None
+    return view
+
+
+def get_service_post_by_id(
+    db: Session, post_id: int, viewer_id: Optional[int] = None
+) -> service_schema.ServicePostDetail | None:
     """Fetches a single, detailed service post by its ID."""
     post = db.query(service_model.ServicePost).options(
         joinedload(service_model.ServicePost.poster),
         joinedload(service_model.ServicePost.tags)
     ).filter(service_model.ServicePost.id == post_id).first()
     
-    if post and post.is_anonymous:
-        post.poster = None
-
-    return post
+    return _post_view(post, service_schema.ServicePostDetail, viewer_id) if post else None
 
 def delete_service_post(db: Session, post_id: int, user: user_model.User):
     post_to_delete = db.query(service_model.ServicePost).filter(

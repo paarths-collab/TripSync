@@ -253,7 +253,8 @@ def reset_demo(db: Session) -> dict:
     requests, suggestions and connection proposals touching them, the parties they
     were in (with members, events, outbox rows, change proposals) and their
     idempotency records. Demo users, profiles, landmarks and all other users' rows
-    stay; a non-demo participant's request that was RESERVED by a deleted party is
+    stay; a non-demo legacy ride partner's CONNECTED request becomes CANCELLED,
+    and a non-demo participant's request that was RESERVED by a deleted party is
     released like a party cancel (OPEN if still valid, else EXPIRED; version + 1). Returns rows deleted per kind.
     """
     counts = {
@@ -291,6 +292,32 @@ def reset_demo(db: Session) -> dict:
         )
         .all()
     ]
+
+    # Keep surviving riders usable when deleting their shared legacy ride.
+    # Discover partners, lock all involved requests in the service's global
+    # order, then re-check in case an approval won before those locks.
+    for _ in range(4):
+        def approved_request_ids():
+            rows = db.query(pooling_model.PoolingConnection).filter(
+                pooling_model.PoolingConnection.status == pooling_model.PoolingConnectionStatus.APPROVED,
+                or_(pooling_model.PoolingConnection.sender_request_id.in_(request_ids),
+                    pooling_model.PoolingConnection.receiver_request_id.in_(request_ids)),
+            ).all()
+            return {rid for row in rows for rid in (row.sender_request_id, row.receiver_request_id)}
+
+        involved = set(request_ids) | approved_request_ids()
+        locked = db.query(pooling_model.PoolingRequest).filter(
+            pooling_model.PoolingRequest.id.in_(involved)
+        ).order_by(pooling_model.PoolingRequest.id).populate_existing().with_for_update().all()
+        if approved_request_ids() <= involved:
+            for row in locked:
+                if row.user_id not in demo_ids and row.status == pooling_model.PoolingRequestStatus.CONNECTED:
+                    row.status = pooling_model.PoolingRequestStatus.CANCELLED
+            db.flush()
+            break
+        db.rollback()
+    else:
+        raise RuntimeError("Demo rides changed during reset; retry when demo activity has stopped")
 
     counts["messages"] = (
         db.query(message_model.Message)
